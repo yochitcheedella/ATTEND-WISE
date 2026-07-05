@@ -1,0 +1,14 @@
+{
+  "name": "attendwise",
+  "version": "1.0.0",
+  "description": "AttendWise - AI-Powered Student Attendance Companion",
+  "main": "index.html",
+  "scripts": {
+    "dev": "vite --port 3000 --open",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "vite": "^5.2.0"
+  }
+}
