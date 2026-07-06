@@ -9,3 +9,5 @@ passlib[bcrypt]
 python-multipart
 reportlab
 openpyxl
+email-validator
+psycopg2-binary

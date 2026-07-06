@@ -33,6 +33,11 @@ class User(UserBase):
     class Config:
         from_attributes = True
 
+class UserUpdate(BaseModel):
+    name: str
+    attendance_goal: float
+    semester: str
+
 # --- Subject Schemas ---
 class SubjectBase(BaseModel):
     name: str
@@ -90,11 +95,6 @@ class Attendance(AttendanceBase):
     class Config:
         from_attributes = True
 
-class UserUpdate(BaseModel):
-    name: str
-    attendance_goal: float
-    semester: str
-
 class TimetableEntry(BaseModel):
     day: str
     subject: str
@@ -112,7 +112,7 @@ class LeavePlanBase(BaseModel):
     title: str
     start_date: date
     end_date: date
-    type: str # Medical, Duty, Holiday, Personal
+    type: str  # Medical, Duty, Holiday, Personal
     status: str = "Approved"
 
 class LeavePlanCreate(LeavePlanBase):
@@ -126,3 +126,83 @@ class LeavePlan(LeavePlanBase):
     class Config:
         from_attributes = True
 
+# ─── New Calendar-Driven Schemas ─────────────────────────────────────────────
+
+class SemesterCreate(BaseModel):
+    name: str                       # e.g. "3-1"
+    academic_year: str              # e.g. "2026-27"
+    start_date: date
+    end_date: date
+
+class SemesterOut(BaseModel):
+    id: int
+    user_id: int
+    name: str
+    academic_year: str
+    start_date: date
+    end_date: date
+    is_active: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class HolidayCreate(BaseModel):
+    date: date
+    name: str
+    type: str  # Public, College, Exam, Festival, Personal
+
+class HolidayOut(BaseModel):
+    id: int
+    semester_id: int
+    date: date
+    name: str
+    type: str
+
+    class Config:
+        from_attributes = True
+
+class TimetableVersionCreate(BaseModel):
+    semester_id: int
+    label: Optional[str] = None
+    effective_from: date
+    timetable: List[TimetableEntry]
+
+class TimetableVersionOut(BaseModel):
+    id: int
+    semester_id: Optional[int]
+    label: Optional[str]
+    effective_from: date
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class ClassSessionOut(BaseModel):
+    id: int
+    date: date
+    start_time: time
+    end_time: time
+    room: Optional[str]
+    session_type: Optional[str]
+    status: str
+    is_extra: bool
+    subject_id: int
+    subject_name: str
+    subject_color: str
+    subject_prof: Optional[str]
+
+    class Config:
+        from_attributes = True
+
+class MarkSessionRequest(BaseModel):
+    status: str  # present, absent, cancelled, holiday
+
+class ExtraClassCreate(BaseModel):
+    semester_id: int
+    subject_id: int
+    date: date
+    start_time: time
+    end_time: time
+    room: Optional[str] = None
+    session_type: Optional[str] = "Extra"

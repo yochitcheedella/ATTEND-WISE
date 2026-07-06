@@ -1,9 +1,7 @@
 // AttendWise AI Student Attendance Companion - Core Business Logic & State Engine
 // Supports offline-first LocalCache (localStorage) and real calculations.
 
-const API_BASE_URL = window.location.origin.includes("localhost") || window.location.origin.includes("127.0.0.1") 
-    ? "http://127.0.0.1:8000" 
-    : window.location.origin;
+const API_BASE_URL = window.location.origin;
 
 
 // ============================================================================
@@ -108,7 +106,8 @@ let appState = {
     attendanceLogs: {}, // dateKey -> array of { subject, start, end, status }
     leavePlans: [],
     notifications: [],
-    timetableMode: "list"
+    timetableMode: "list",
+    activeSemester: null
 };
 
 function getAuthHeaders() {
@@ -253,6 +252,7 @@ async function initAppState() {
             appState.subjects = data.subjects;
             appState.timetable = data.timetable;
             appState.attendanceLogs = data.attendanceLogs;
+            appState.activeSemester = data.active_semester;
             hideAuthScreen();
         } else if (response.status === 401) {
             localStorage.removeItem("access_token");
@@ -816,6 +816,107 @@ function renderDashboard() {
         nextCountdownEl.className = "bg-surface-container-highest text-on-surface-variant text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider";
         markBtn.classList.add("hidden");
     }
+
+    // Render new bento widgets
+    renderDashboardSubjectSummary();
+    renderDashboardRecentLogs();
+    renderDashboardAiInsights(global, analysis, displayStreak);
+    updateSemesterDashboard();
+}
+
+// --- DASHBOARD BENTO WIDGETS ---
+
+function renderDashboardSubjectSummary() {
+    const box = document.getElementById("dash-subjects-list");
+    if (!box) return;
+    box.innerHTML = "";
+    const subjectStats = calculateSubjectAttendance();
+    const names = Object.keys(subjectStats);
+    if (names.length === 0) {
+        box.innerHTML = `<p class="text-[11px] text-on-surface-variant/50 text-center py-4">No subjects found.</p>`;
+        return;
+    }
+    names.forEach(name => {
+        const stats = subjectStats[name];
+        let bar = "bg-primary", pctClass = "text-on-surface-variant";
+        if (stats.percent < appState.profile.targetGoal && stats.total > 0) {
+            bar = "bg-error"; pctClass = "text-error font-bold";
+        } else if (stats.percent >= 85) {
+            bar = "bg-secondary";
+        }
+        const row = document.createElement("div");
+        row.className = "space-y-1";
+        row.innerHTML = `
+            <div class="flex justify-between items-center">
+                <span class="font-semibold text-[11px] text-on-surface truncate max-w-[150px]" title="${name}">${name}</span>
+                <span class="text-[11px] ${pctClass}">${stats.percent}%</span>
+            </div>
+            <div class="h-1 w-full bg-surface-container rounded-full overflow-hidden">
+                <div class="h-full ${bar} rounded-full transition-all duration-700" style="width:${stats.percent}%"></div>
+            </div>
+        `;
+        box.appendChild(row);
+    });
+}
+
+function renderDashboardRecentLogs() {
+    const box = document.getElementById("dash-recent-logs");
+    if (!box) return;
+    box.innerHTML = "";
+    const allLogs = [];
+    Object.keys(appState.attendanceLogs).forEach(dateKey => {
+        (appState.attendanceLogs[dateKey] || []).forEach(cls => {
+            if (cls.status !== "upcoming") allLogs.push({ date: dateKey, ...cls });
+        });
+    });
+    allLogs.sort((a, b) => b.date.localeCompare(a.date) || b.start.localeCompare(a.start));
+    const recent = allLogs.slice(0, 5);
+    if (recent.length === 0) {
+        box.innerHTML = `<p class="text-[11px] text-on-surface-variant/50 text-center py-4">No attendance marked yet.</p>`;
+        return;
+    }
+    const dotMap = { present: "bg-secondary", absent: "bg-error", cancelled: "bg-tertiary", holiday: "bg-outline" };
+    const labelMap = { present: "Present", absent: "Absent", cancelled: "Cancelled", holiday: "Holiday" };
+    recent.forEach(log => {
+        const dot = dotMap[log.status] || "bg-primary";
+        const label = labelMap[log.status] || log.status;
+        const dateShort = new Date(log.date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
+        const item = document.createElement("div");
+        item.className = "relative pl-1 mb-3 last:mb-0";
+        item.innerHTML = `
+            <div class="absolute -left-[17px] top-1.5 w-2 h-2 rounded-full ${dot} border border-background"></div>
+            <div class="flex justify-between items-center">
+                <span class="font-bold text-[11px] text-on-surface truncate max-w-[130px]" title="${log.subject}">${log.subject}</span>
+                <span class="text-[9px] text-on-surface-variant">${dateShort}</span>
+            </div>
+            <p class="text-[10px] text-on-surface-variant mt-0.5">Marked <span class="font-semibold text-on-surface">${label}</span></p>
+        `;
+        box.appendChild(item);
+    });
+}
+
+function renderDashboardAiInsights(global, analysis, displayStreak) {
+    const box = document.getElementById("dash-ai-insight-box");
+    if (!box) return;
+    const subjectStats = calculateSubjectAttendance();
+    let lowestSubject = null, lowestPct = 100;
+    Object.values(subjectStats).forEach(s => {
+        if (s.total > 0 && s.percent < lowestPct) { lowestPct = s.percent; lowestSubject = s; }
+    });
+    let aiHtml = "", theme = "bg-primary/8 border-primary/20";
+    if (lowestSubject && lowestPct < appState.profile.targetGoal) {
+        aiHtml = `<span class="material-symbols-outlined text-error text-[14px] mr-1 align-middle">warning</span><strong class="text-error">Warning:</strong> ${lowestSubject.name || lowestSubject.code} is at <strong class="text-error">${lowestPct}%</strong> — below your ${appState.profile.targetGoal}% goal. Attend the next class!`;
+        theme = "bg-error/8 border-error/20";
+    } else if (analysis.type === "safe" && analysis.count >= 3) {
+        aiHtml = `<span class="material-symbols-outlined text-secondary text-[14px] mr-1 align-middle">check_circle</span>Great shape! You have <strong class="text-secondary">${analysis.count} safe bunks</strong> remaining at your current pace.`;
+        theme = "bg-secondary/8 border-secondary/20";
+    } else if (global.percentage >= appState.profile.targetGoal) {
+        aiHtml = `<span class="material-symbols-outlined text-primary text-[14px] mr-1 align-middle">local_fire_department</span>Your <strong class="text-primary">${displayStreak}-day streak</strong> is keeping you on track. Stay consistent to maintain your ${appState.profile.targetGoal}% target.`;
+    } else {
+        aiHtml = `<span class="material-symbols-outlined text-error text-[14px] mr-1 align-middle">trending_down</span>Your attendance is at <strong class="text-error">${global.percentage}%</strong>. Attend the next <strong class="text-on-surface">${analysis.count || 1}</strong> classes to recover.`;
+        theme = "bg-error/8 border-error/20";
+    }
+    box.innerHTML = `<div class="border rounded-xl p-3 text-[12px] leading-relaxed text-on-surface-variant ${theme}">${aiHtml}</div>`;
 }
 
 function formatTimeAmPm(timeStr) {
@@ -828,18 +929,67 @@ function formatTimeAmPm(timeStr) {
     return `${hours}:${minutes} ${ampm}`;
 }
 
+// --- NEW HELPER ---
+function ensureDailyScheduleReady(dateKey) {
+    const parts = dateKey.split("-");
+    const d = new Date(parts[0], parts[1] - 1, parts[2]);
+    const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const dayName = weekdays[d.getDay()];
+    
+    // Get expected classes from timetable
+    const dayClasses = appState.timetable.filter(c => c.day === dayName).map(c => ({...c}));
+    
+    let existingLogs = appState.attendanceLogs[dateKey] || [];
+    
+    // Merge expected classes with existing logs from backend
+    let mergedLogs = dayClasses.map(c => {
+        let existing = existingLogs.find(r => r.subject === c.subject && r.start === c.start);
+        if (existing) {
+            return {
+                subject: c.subject,
+                start: c.start,
+                end: c.end || existing.end,
+                status: existing.status,
+                color: c.color
+            };
+        } else {
+            return {
+                subject: c.subject,
+                start: c.start,
+                end: c.end,
+                status: "upcoming",
+                color: c.color
+            };
+        }
+    });
+    
+    // Check if there are any existing logs that are NOT in the timetable
+    existingLogs.forEach(el => {
+        if (!mergedLogs.find(ml => ml.subject === el.subject && ml.start === el.start)) {
+            mergedLogs.push({
+                subject: el.subject,
+                start: el.start,
+                end: el.end,
+                status: el.status,
+                color: el.color
+            });
+        }
+    });
+    
+    mergedLogs.sort((a, b) => {
+        const timeA = parseInt(a.start.replace(":", ""));
+        const timeB = parseInt(b.start.replace(":", ""));
+        return timeA - timeB;
+    });
+    
+    appState.attendanceLogs[dateKey] = mergedLogs;
+    return mergedLogs;
+}
+
 // Quick action from dashboard card
 async function quickMarkClassPresent(subject, start, end) {
     const todayStr = formatDateKey(new Date());
-    if (!appState.attendanceLogs[todayStr]) {
-        const dayIdx = new Date().getDay();
-        const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-        const todayDayStr = weekdays[dayIdx];
-        const dayClasses = appState.timetable.filter(c => c.day === todayDayStr);
-        appState.attendanceLogs[todayStr] = dayClasses.map(c => ({
-            subject: c.subject, start: c.start, end: c.end, status: "upcoming", color: c.color
-        }));
-    }
+    ensureDailyScheduleReady(todayStr);
     
     const record = appState.attendanceLogs[todayStr].find(c => c.subject === subject && c.start === start);
     if (record) {
@@ -981,31 +1131,19 @@ function renderDailyScheduleList() {
         return;
     }
     
-    let dayRecords = appState.attendanceLogs[dateKey];
+    let dayRecords = ensureDailyScheduleReady(dateKey);
     
-    if (!dayRecords) {
-        // Populated from timetable
-        const dayClasses = appState.timetable.filter(c => c.day === dayName);
-        if (dayClasses.length === 0) {
-            listBox.innerHTML = `
-                <div class="text-center py-10 glass-card rounded-3xl p-6">
-                    <span class="material-symbols-outlined text-[48px] text-on-surface-variant/40">event_busy</span>
-                    <p class="text-on-surface-variant font-bold text-[14px] mt-2">No Scheduled Classes</p>
-                    <p class="text-[11px] text-on-surface-variant/80 mt-1">Your timetable has no lectures configured for ${dayName}s.</p>
-                </div>
-            `;
-            document.getElementById("daily-marked-ratio").textContent = "0/0 Classes";
-            document.getElementById("daily-schedule-progress-bar").style.width = "0%";
-            return;
-        }
-        dayRecords = dayClasses.map(c => ({
-            subject: c.subject,
-            start: c.start,
-            end: c.end,
-            status: "upcoming"
-        }));
-        
-        appState.attendanceLogs[dateKey] = dayRecords;
+    if (dayRecords.length === 0) {
+        listBox.innerHTML = `
+            <div class="text-center py-10 glass-card rounded-3xl p-6">
+                <span class="material-symbols-outlined text-[48px] text-on-surface-variant/40">event_busy</span>
+                <p class="text-on-surface-variant font-bold text-[14px] mt-2">No Scheduled Classes</p>
+                <p class="text-[11px] text-on-surface-variant/80 mt-1">Your timetable has no lectures configured for ${dayName}s.</p>
+            </div>
+        `;
+        document.getElementById("daily-marked-ratio").textContent = "0/0 Classes";
+        document.getElementById("daily-schedule-progress-bar").style.width = "0%";
+        return;
     }
     
     // Sort chronologically
@@ -1201,22 +1339,22 @@ async function renderAnalytics() {
     ];
     
     // Construct calendar matrix for last 16 weeks (columns = 16, rows = 7 days)
+    // Column 15 (rightmost) = current week; column 0 = 15 weeks ago
     const today = new Date();
-    const sixteenWeeksAgo = new Date();
-    sixteenWeeksAgo.setDate(today.getDate() - 16 * 7);
-    
-    // Align to Monday of that week
-    const firstDayIndex = sixteenWeeksAgo.getDay();
-    const mondayOffset = firstDayIndex === 0 ? -6 : 1 - firstDayIndex;
-    sixteenWeeksAgo.setDate(sixteenWeeksAgo.getDate() + mondayOffset);
+    const currentDayIdx = today.getDay(); // 0 = Sun
+    const currentMonday = new Date(today);
+    currentMonday.setDate(today.getDate() + (currentDayIdx === 0 ? -6 : 1 - currentDayIdx));
+    // Start Monday = 15 weeks before current Monday
+    const startMonday = new Date(currentMonday);
+    startMonday.setDate(currentMonday.getDate() - 15 * 7);
 
     for (let c = 0; c < 16; c++) {
         const col = document.createElement("div");
         col.className = "flex flex-col gap-1";
         
         for (let r = 0; r < 7; r++) {
-            const cellDate = new Date(sixteenWeeksAgo);
-            cellDate.setDate(sixteenWeeksAgo.getDate() + (c * 7 + r));
+            const cellDate = new Date(startMonday);
+            cellDate.setDate(startMonday.getDate() + (c * 7 + r));
             const dateStr = formatDateKey(cellDate);
             
             let level = 0;
@@ -2800,42 +2938,98 @@ function removeSelectedOcrFile(e) {
     document.getElementById("ocr-submit-btn").classList.add("hidden");
 }
 
-function startOcrFileScanning() {
+async function startOcrFileScanning() {
     if (!selectedOcrFile) return;
-    
+
     const loader = document.getElementById("ocr-scanning-loader");
+    const loaderText = document.getElementById("ocr-loader-text");
     loader.classList.remove("hidden");
-    
+    if (loaderText) loaderText.textContent = "Sending to Gemini AI...";
+
     const submitBtn = document.getElementById("ocr-submit-btn");
     submitBtn.disabled = true;
     submitBtn.classList.add("opacity-50");
-    
-    setTimeout(() => {
+
+    const formData = new FormData();
+    formData.append("file", selectedOcrFile);
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/timetable/ocr`, {
+            method: "POST",
+            headers: getAuthHeaders(),
+            body: formData
+        });
+
         loader.classList.add("hidden");
         submitBtn.disabled = false;
         submitBtn.classList.remove("opacity-50");
-        toggleModal("ocrModal");
+
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({ detail: "Unknown error" }));
+            showToast("OCR Failed", err.detail || "Gemini could not parse the timetable.", "error");
+            return;
+        }
+
+        const data = await response.json();
+        if (!data.timetable || data.timetable.length === 0) {
+            showToast("No Classes Found", "Gemini could not detect any class entries. Try a clearer image.", "warning");
+            return;
+        }
+
+        // Store timetable temporarily
+        appState.tempTimetable = data.timetable;
         
-        // Mock parsed classes from OCR scanning mapping
-        appState.timetable = [
-            { day: "Mon", subject: "Advanced Algorithms", start: "09:00", end: "10:00", room: "Room 402", prof: "Dr. Alan Turing", type: "Lecture" },
-            { day: "Mon", subject: "Data Science Fundamentals", start: "10:00", end: "11:00", room: "Lab 2A", prof: "Prof. Ada Lovelace", type: "Practical" },
-            { day: "Mon", subject: "Cyber Ethics", start: "11:00", end: "12:00", room: "Room 101", prof: "Prof. Dennis Ritchie", type: "Lecture" },
-            { day: "Tue", subject: "Data Science Fundamentals", start: "09:00", end: "10:00", room: "Lab 2A", prof: "Prof. Ada Lovelace", type: "Lecture" },
-            { day: "Tue", subject: "Psychology", start: "10:00", end: "11:00", room: "Room 305", prof: "Dr. William James", type: "Lecture" },
-            { day: "Wed", subject: "Cloud Computing Lab", start: "09:00", end: "10:00", room: "Seminar Hall", prof: "Dr. Grace Hopper", type: "Practical" },
-            { day: "Wed", subject: "Cyber Ethics", start: "10:00", end: "11:00", room: "Room 101", prof: "Prof. Dennis Ritchie", type: "Lecture" },
-            { day: "Thu", subject: "Advanced Algorithms", start: "09:00", end: "10:00", room: "Room 402", prof: "Dr. Alan Turing", type: "Lecture" },
-            { day: "Thu", subject: "Data Science Fundamentals", start: "10:00", end: "11:00", room: "Lab 2A", prof: "Prof. Ada Lovelace", type: "Practical" },
-            { day: "Fri", subject: "Psychology", start: "09:00", end: "10:00", room: "Room 305", prof: "Dr. William James", type: "Lecture" },
-            { day: "Fri", subject: "Cloud Computing Lab", start: "13:00", end: "14:00", room: "Seminar Hall", prof: "Dr. Grace Hopper", type: "Hybrid" }
-        ];
+        // Populate preview table
+        const previewBody = document.getElementById("ocr-preview-table-body");
+        previewBody.innerHTML = "";
+        data.timetable.forEach(entry => {
+            const tr = document.createElement("tr");
+            tr.className = "border-b border-outline-variant/10 py-1 text-on-surface text-[11px]";
+            
+            // Format start/end time nicely for display
+            const timeStr = `${formatTimeAmPm(entry.start)} - ${formatTimeAmPm(entry.end)}`;
+            const typeBadgeColor = entry.type === 'Break' ? 'bg-outline-variant/20 text-on-surface-variant' : entry.type === 'Practical' ? 'bg-secondary/15 text-secondary border border-secondary/20' : 'bg-primary/10 text-primary border border-primary/20';
+            
+            tr.innerHTML = `
+                <td class="py-1.5 font-bold text-on-surface-variant">${entry.day}</td>
+                <td class="py-1.5 font-extrabold max-w-[120px] truncate">${entry.subject}</td>
+                <td class="py-1.5 font-semibold">${timeStr}</td>
+                <td class="py-1.5"><span class="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${typeBadgeColor}">${entry.type}</span></td>
+            `;
+            previewBody.appendChild(tr);
+        });
         
-        saveStateToLocalStorage();
-        renderTimetableClasses();
-        showToast("Timetable Processed", `AI scanned "${selectedOcrFile.name}" and extracted ${appState.timetable.length} classes mapped to period slots.`, "center_focus_strong");
+        // Expand modal width to max-w-2xl
+        const modalContainer = document.getElementById("ocrModal").querySelector(".max-w-md, .max-w-2xl");
+        if (modalContainer) {
+            modalContainer.classList.replace("max-w-md", "max-w-2xl");
+        }
+        
+        // Switch Steps visibility
+        document.getElementById("ocr-step-1").classList.add("hidden");
+        document.getElementById("ocr-step-2").classList.remove("hidden");
+        
+        // Prefill dates if there's already an activeSemester
+        if (appState.activeSemester) {
+            document.getElementById("ocr-semester-start").value = appState.activeSemester.start_date;
+            document.getElementById("ocr-semester-end").value = appState.activeSemester.end_date;
+            onOcrDatesChange();
+        } else {
+            document.getElementById("ocr-semester-start").value = "";
+            document.getElementById("ocr-semester-end").value = "";
+            document.getElementById("ocr-calc-panel").classList.add("hidden");
+        }
+        
+        showToast("Timetable Parsed ✨", `AI extracted ${data.total_classes} items. Please set your semester dates to proceed.`, "auto_awesome");
         removeSelectedOcrFile();
-    }, 2000);
+
+    } catch (e) {
+        loader.classList.add("hidden");
+        submitBtn.disabled = false;
+        submitBtn.classList.remove("opacity-50");
+        console.error("OCR error:", e);
+        showToast("Connection Error", "Could not reach the AI OCR service. Is the backend running?", "error");
+    }
 }
 
 // ============================================================================
@@ -2863,3 +3057,450 @@ document.addEventListener("DOMContentLoaded", async () => {
         showToast("AttendWise AI Active", `Hi ${appState.profile.name}, target set to ${appState.profile.targetGoal}%. Keep tracking!`, "insights");
     }, 1500);
 });
+
+// Expose functions to window object for inline HTML event handlers (since app.js is a module)
+window.switchAuthTab = switchAuthTab;
+window.quickLoginDemo = quickLoginDemo;
+window.handleAuthSignIn = handleAuthSignIn;
+window.handleAuthSignUp = handleAuthSignUp;
+window.handleAuthSignOut = handleAuthSignOut;
+window.tabNavigation = tabNavigation;
+window.openProfileModal = openProfileModal;
+window.toggleMobileSidebar = toggleMobileSidebar;
+window.toggleNotificationPanel = toggleNotificationPanel;
+window.markAllNotificationsRead = markAllNotificationsRead;
+window.triggerGreetingNotification = triggerGreetingNotification;
+window.downloadReportPDF = downloadReportPDF;
+window.downloadReportCSV = downloadReportCSV;
+window.loadReportPreview = loadReportPreview;
+window.toggleScheduleSubTab = toggleScheduleSubTab;
+window.toggleTimetableViewMode = toggleTimetableViewMode;
+window.toggleModal = toggleModal;
+window.openAddClassModal = openAddClassModal;
+window.changeCalendarMonth = changeCalendarMonth;
+window.handleOcrFileDrop = handleOcrFileDrop;
+window.removeSelectedOcrFile = removeSelectedOcrFile;
+window.startOcrFileScanning = startOcrFileScanning;
+window.saveCustomClass = saveCustomClass;
+window.saveProfileSettings = saveProfileSettings;
+window.handleCreateLeavePlan = handleCreateLeavePlan;
+window.resetAppData = resetAppData;
+
+// Add missing exposures for dynamic element event handlers
+window.updateRecordStatus = updateRecordStatus;
+window.editClassRecord = editClassRecord;
+window.deleteClassRecord = deleteClassRecord;
+window.openAddClassModalForSlot = openAddClassModalForSlot;
+window.deleteLeavePlan = deleteLeavePlan;
+window.onClassPeriodSelectChange = onClassPeriodSelectChange;
+
+// --- SEMESTER DETAILS & DATE UTILITIES ---
+
+function countWeekdaysInRange(startDate, endDate, dayName, holidays) {
+    const daysMap = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    let count = 0;
+    
+    // Normalize dates to midnight to avoid timezone offsets causing issues
+    const start = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+    const end = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
+    
+    const holidaySet = new Set((holidays || []).map(h => {
+        if (typeof h === "string") return h;
+        if (h.date) return h.date;
+        if (h.toISOString) return h.toISOString().split("T")[0];
+        return "";
+    }).filter(Boolean));
+    
+    let curr = new Date(start);
+    while (curr <= end) {
+        if (daysMap[curr.getDay()] === dayName) {
+            const dateStr = formatDateKey(curr);
+            if (!holidaySet.has(dateStr)) {
+                count++;
+            }
+        }
+        curr.setDate(curr.getDate() + 1);
+    }
+    return count;
+}
+
+function calculateWorkingDays(startDate, endDate, holidays, timetable) {
+    const activeDays = new Set(timetable.map(t => t.day));
+    if (activeDays.size === 0) {
+        activeDays.add("Mon").add("Tue").add("Wed").add("Thu").add("Fri");
+    }
+    
+    let count = 0;
+    
+    const start = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+    const end = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
+    
+    const holidaySet = new Set((holidays || []).map(h => {
+        if (typeof h === "string") return h;
+        if (h.date) return h.date;
+        if (h.toISOString) return h.toISOString().split("T")[0];
+        return "";
+    }).filter(Boolean));
+    
+    const daysMap = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    
+    let curr = new Date(start);
+    while (curr <= end) {
+        const dayStr = daysMap[curr.getDay()];
+        const dateStr = formatDateKey(curr);
+        if (activeDays.has(dayStr) && !holidaySet.has(dateStr)) {
+            count++;
+        }
+        curr.setDate(curr.getDate() + 1);
+    }
+    return count;
+}
+
+function calculateSubjectExpectedClasses(subjectName, startDate, endDate, holidays, timetable) {
+    let expected = 0;
+    const subjectSlots = timetable.filter(t => t.subject === subjectName);
+    const daysMap = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    
+    const start = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+    const end = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
+    
+    const holidaySet = new Set((holidays || []).map(h => {
+        if (typeof h === "string") return h;
+        if (h.date) return h.date;
+        if (h.toISOString) return h.toISOString().split("T")[0];
+        return "";
+    }).filter(Boolean));
+    
+    subjectSlots.forEach(slot => {
+        let curr = new Date(start);
+        while (curr <= end) {
+            if (daysMap[curr.getDay()] === slot.day) {
+                const dateStr = formatDateKey(curr);
+                if (!holidaySet.has(dateStr)) {
+                    expected++;
+                }
+            }
+            curr.setDate(curr.getDate() + 1);
+        }
+    });
+    return expected;
+}
+
+function onOcrDatesChange() {
+    const startVal = document.getElementById("ocr-semester-start").value;
+    const endVal = document.getElementById("ocr-semester-end").value;
+    const calcPanel = document.getElementById("ocr-calc-panel");
+    
+    if (!startVal || !endVal) {
+        calcPanel.classList.add("hidden");
+        return;
+    }
+    
+    const startDate = new Date(startVal + "T00:00:00");
+    const endDate = new Date(endVal + "T00:00:00");
+    
+    if (endDate < startDate) {
+        calcPanel.classList.add("hidden");
+        return;
+    }
+    
+    calcPanel.classList.remove("hidden");
+    
+    // Calculate duration
+    const diffTime = endDate - startDate;
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; // inclusive
+    const weeks = Math.floor(diffDays / 7);
+    const remainingDays = diffDays % 7;
+    
+    let durationText = `${diffDays} days`;
+    let weeksText = `${weeks} week${weeks !== 1 ? 's' : ''}`;
+    if (remainingDays > 0) {
+        weeksText += ` + ${remainingDays} day${remainingDays !== 1 ? 's' : ''}`;
+    }
+    
+    // Approximate months and days
+    let months = (endDate.getFullYear() - startDate.getFullYear()) * 12 + (endDate.getMonth() - startDate.getMonth());
+    let startDay = startDate.getDate();
+    let endDay = endDate.getDate();
+    let mDays = 0;
+    if (endDay >= startDay) {
+        mDays = endDay - startDay;
+    } else {
+        months--;
+        const tempDate = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0);
+        mDays = tempDate.getDate() - startDay + endDay;
+    }
+    
+    let lengthText = `${diffDays} days (${weeksText})`;
+    if (months > 0 || mDays > 0) {
+        lengthText += ` ≈ ${months} mo ${mDays} days`;
+    }
+    
+    document.getElementById("ocr-calc-duration").textContent = `${diffDays} days`;
+    document.getElementById("ocr-calc-weeks").textContent = weeksText;
+    
+    // Calculate working days
+    const workingDays = calculateWorkingDays(startDate, endDate, appState.leavePlans, appState.tempTimetable || appState.timetable);
+    document.getElementById("ocr-calc-working-days").textContent = `${workingDays} days`;
+    
+    // Expected classes per subject
+    const subjectsList = document.getElementById("ocr-calc-subjects-expected");
+    subjectsList.innerHTML = "";
+    
+    const timetableToUse = appState.tempTimetable || appState.timetable;
+    const uniqueSubjects = Array.from(new Set(timetableToUse.map(t => t.subject)));
+    
+    uniqueSubjects.forEach(subName => {
+        if (subName.toLowerCase().includes("break") || subName.toLowerCase().includes("recess")) return;
+        
+        const count = calculateSubjectExpectedClasses(subName, startDate, endDate, appState.leavePlans, timetableToUse);
+        const div = document.createElement("div");
+        div.className = "flex justify-between py-1 border-b border-outline-variant/10 last:border-0";
+        div.innerHTML = `
+            <span class="text-on-surface-variant font-medium">${subName}</span>
+            <span class="text-on-surface font-bold">${count} classes</span>
+        `;
+        subjectsList.appendChild(div);
+    });
+}
+
+function closeOcrModal() {
+    toggleModal("ocrModal");
+    setTimeout(() => {
+        document.getElementById("ocr-step-1").classList.remove("hidden");
+        document.getElementById("ocr-step-2").classList.add("hidden");
+        const modalContainer = document.getElementById("ocrModal").querySelector(".max-w-2xl, .max-w-md");
+        if (modalContainer) {
+            modalContainer.classList.replace("max-w-2xl", "max-w-md");
+        }
+        removeSelectedOcrFile();
+    }, 300);
+}
+
+async function confirmOcrImport() {
+    const startVal = document.getElementById("ocr-semester-start").value;
+    const endVal = document.getElementById("ocr-semester-end").value;
+    
+    if (!startVal || !endVal) {
+        showToast("Dates Required", "Please select both semester start and end dates.", "warning");
+        return;
+    }
+    
+    const startDate = new Date(startVal + "T00:00:00");
+    const endDate = new Date(endVal + "T00:00:00");
+    
+    if (endDate < startDate) {
+        showToast("Invalid Dates", "Semester end date must be after start date.", "error");
+        return;
+    }
+    
+    const saveBtn = document.getElementById("ocr-save-btn");
+    saveBtn.disabled = true;
+    saveBtn.textContent = "Setting Up Semester...";
+    
+    try {
+        const startYear = startDate.getFullYear();
+        const endYear = endDate.getFullYear();
+        const academicYear = `${startYear}-${String(endYear).slice(-2)}`;
+        
+        // 1. Create active semester
+        const semResponse = await fetch(`${API_BASE_URL}/semesters`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                ...getAuthHeaders()
+            },
+            body: JSON.stringify({
+                name: appState.profile.term || "Semester 1",
+                academic_year: academicYear,
+                start_date: startVal,
+                end_date: endVal
+            })
+        });
+        
+        if (!semResponse.ok) {
+            const err = await semResponse.json();
+            showToast("Setup Failed", err.detail || "Could not set semester dates.", "error");
+            saveBtn.disabled = false;
+            saveBtn.textContent = "Save & Generate Calendar";
+            return;
+        }
+        
+        const semData = await semResponse.json();
+        appState.activeSemester = semData;
+        
+        // 2. Sync timetable schedule
+        const timetableToSave = appState.tempTimetable || appState.timetable;
+        const syncResponse = await fetch(`${API_BASE_URL}/timetable/sync`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                ...getAuthHeaders()
+            },
+            body: JSON.stringify({
+                timetable: timetableToSave
+            })
+        });
+        
+        if (!syncResponse.ok) {
+            showToast("Partial Setup", "Semester saved but schedule sync failed. Check backend logs.", "warning");
+            saveBtn.disabled = false;
+            saveBtn.textContent = "Save & Generate Calendar";
+            return;
+        }
+        
+        appState.timetable = timetableToSave;
+        delete appState.tempTimetable;
+        
+        // Save to cache
+        saveStateToLocalStorage();
+        
+        // Close modal wizard
+        closeOcrModal();
+        
+        // Refresh State completely
+        await initAppState();
+        
+        // Refresh UI
+        renderDashboard();
+        renderTimetableClasses();
+        
+        showToast("Setup Complete ✨", "Timetable imported & academic calendar generated successfully!", "check_circle");
+        
+    } catch (e) {
+        console.error("Confirm OCR import error:", e);
+        showToast("Connection Error", "Could not complete setup. Check your network.", "error");
+        saveBtn.disabled = false;
+        saveBtn.textContent = "Save & Generate Calendar";
+    }
+}
+
+function updateSemesterDashboard() {
+    const banner = document.getElementById("dashboard-setup-banner");
+    const card = document.getElementById("dashboard-semester-card");
+    
+    if (!banner || !card) return;
+    
+    if (!appState.activeSemester) {
+        banner.classList.remove("hidden");
+        card.classList.add("hidden");
+        return;
+    }
+    
+    banner.classList.add("hidden");
+    card.classList.remove("hidden");
+    
+    const startDate = new Date(appState.activeSemester.start_date + "T00:00:00");
+    const endDate = new Date(appState.activeSemester.end_date + "T00:00:00");
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    
+    // Date range labels
+    const option = { day: 'numeric', month: 'short', year: 'numeric' };
+    const dateRangeText = `Start: ${startDate.toLocaleDateString('en-US', option)} | End: ${endDate.toLocaleDateString('en-US', option)}`;
+    document.getElementById("sem-card-date-range").textContent = dateRangeText;
+    
+    // Status pill
+    const progressPill = document.getElementById("sem-card-progress-pill");
+    if (today > endDate) {
+        progressPill.textContent = "Ended";
+        progressPill.className = "px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-outline-variant text-on-surface-variant";
+    } else if (today < startDate) {
+        progressPill.textContent = "Upcoming";
+        progressPill.className = "px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-primary/15 text-primary border border-primary/20";
+    } else {
+        progressPill.textContent = "Active";
+        progressPill.className = "px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-secondary/15 text-secondary border border-secondary/20 shadow-[0_0_8px_rgba(64,229,108,0.2)]";
+    }
+    
+    // Semester length
+    const diffTime = endDate - startDate;
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+    const weeks = Math.floor(diffDays / 7);
+    const remDays = diffDays % 7;
+    let weeksText = `${weeks} week${weeks !== 1 ? 's' : ''}`;
+    if (remDays > 0) weeksText += ` + ${remDays} day${remDays !== 1 ? 's' : ''}`;
+    
+    document.getElementById("sem-card-length-days").textContent = `${diffDays} Days`;
+    document.getElementById("sem-card-length-weeks").textContent = weeksText;
+    
+    // Working days
+    const holidays = appState.leavePlans || [];
+    const totalWorkingDays = calculateWorkingDays(startDate, endDate, holidays, appState.timetable);
+    const remainingStart = today > startDate ? today : startDate;
+    const remainingWorkingDays = today > endDate ? 0 : calculateWorkingDays(remainingStart, endDate, holidays, appState.timetable);
+    
+    document.getElementById("sem-card-working-days").textContent = `${totalWorkingDays} Days`;
+    document.getElementById("sem-card-working-remaining").textContent = `${remainingWorkingDays} remaining`;
+    
+    // Classes remaining & expected
+    let totalExpectedClasses = 0;
+    let totalRemainingClasses = 0;
+    
+    const uniqueSubjects = Array.from(new Set(appState.timetable.map(t => t.subject)));
+    uniqueSubjects.forEach(subName => {
+        if (subName.toLowerCase().includes("break") || subName.toLowerCase().includes("recess")) return;
+        
+        const exp = calculateSubjectExpectedClasses(subName, startDate, endDate, holidays, appState.timetable);
+        const rem = today > endDate ? 0 : calculateSubjectExpectedClasses(subName, remainingStart, endDate, holidays, appState.timetable);
+        totalExpectedClasses += exp;
+        totalRemainingClasses += rem;
+    });
+    
+    document.getElementById("sem-card-classes-remaining").textContent = totalRemainingClasses;
+    document.getElementById("sem-card-expected-total").textContent = `of ${totalExpectedClasses} expected`;
+    
+    // Daily target minimum classes to attend today
+    const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const todayDayStr = weekdays[today.getDay()];
+    const classesToday = appState.timetable.filter(c => c.day === todayDayStr && !c.subject.toLowerCase().includes("break") && !c.subject.toLowerCase().includes("recess")).length;
+    
+    if (classesToday > 0 && today >= startDate && today <= endDate) {
+        const targetGoal = appState.profile.targetGoal;
+        const targetCount = Math.ceil(targetGoal / 100 * classesToday);
+        document.getElementById("sem-card-daily-target").textContent = `${targetCount} / ${classesToday}`;
+    } else {
+        document.getElementById("sem-card-daily-target").textContent = "0 Classes";
+    }
+    
+    // End-of-Semester Predictor table
+    const global = calculateGlobalAttendance();
+    const predictorBody = document.getElementById("sem-card-predictor-table-body");
+    predictorBody.innerHTML = "";
+    
+    const targets = [75, 80, 85, 90];
+    targets.forEach(t => {
+        const neededTotal = Math.ceil(t / 100 * totalExpectedClasses);
+        const neededAdditional = neededTotal - global.present;
+        const maxBunks = totalExpectedClasses - neededTotal - global.absent;
+        
+        let statusText = "";
+        let badgeClass = "";
+        
+        if (neededAdditional <= 0) {
+            statusText = `✅ Safe (Can bunk all ${totalRemainingClasses} remaining classes)`;
+            badgeClass = "text-secondary bg-secondary/10 px-2 py-0.5 rounded";
+        } else if (neededAdditional > totalRemainingClasses) {
+            statusText = `❌ Not possible (Requires ${neededTotal} presents, max reachable is ${global.present + totalRemainingClasses})`;
+            badgeClass = "text-error bg-error/10 px-2 py-0.5 rounded";
+        } else {
+            statusText = `⚠️ Attend ${neededAdditional} of ${totalRemainingClasses} remaining (Can bunk at most ${maxBunks})`;
+            badgeClass = "text-primary bg-primary/10 px-2 py-0.5 rounded";
+        }
+        
+        const tr = document.createElement("tr");
+        tr.className = "border-b border-outline-variant/10 py-1.5 last:border-0";
+        tr.innerHTML = `
+            <td class="py-2 text-[12px] font-bold text-on-surface">${t}%</td>
+            <td class="py-2 text-[11px]"><span class="${badgeClass}">${statusText}</span></td>
+        `;
+        predictorBody.appendChild(tr);
+    });
+}
+
+// Window exposures
+window.closeOcrModal = closeOcrModal;
+window.onOcrDatesChange = onOcrDatesChange;
+window.confirmOcrImport = confirmOcrImport;
+window.updateSemesterDashboard = updateSemesterDashboard;
+

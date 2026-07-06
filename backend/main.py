@@ -2,7 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException, status, File, UploadFile, H
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from datetime import date, timedelta
+from datetime import date, time, timedelta
 import os
 import base64
 import requests
@@ -35,9 +35,82 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.get("/", tags=["Root"])
-def read_root():
-    return {"message": "Welcome to AttendWise API. Visit /docs for Swagger UI."}
+import uuid
+import time
+from datetime import datetime
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+# Middleware for Request ID & Structured Logging (Checklist Section 6)
+@app.middleware("http")
+async def add_request_id_and_logging(request, call_next):
+    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+    request.state.request_id = request_id
+    
+    start_time = time.time()
+    try:
+        response = await call_next(request)
+        process_time = time.time() - start_time
+        print(f"INFO: {request.method} {request.url.path} - {response.status_code} (Duration: {process_time:.4f}s, RequestID: {request_id})")
+        response.headers["X-Request-ID"] = request_id
+        return response
+    except Exception as e:
+        process_time = time.time() - start_time
+        print(f"ERROR: {request.method} {request.url.path} failed - {str(e)} (Duration: {process_time:.4f}s, RequestID: {request_id})")
+        raise e
+
+# Custom Global Exception Handlers (Checklist Section 5)
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request, exc):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "success": False,
+            "message": exc.detail,
+            "error": exc.detail,
+            "timestamp": datetime.utcnow().isoformat(),
+            "requestId": getattr(request.state, "request_id", str(uuid.uuid4()))
+        }
+    )
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc):
+    errors = exc.errors()
+    err_msgs = [f"{'.'.join(str(loc) for loc in err['loc'])}: {err['msg']}" for err in errors]
+    message = "Validation error: " + "; ".join(err_msgs)
+    return JSONResponse(
+        status_code=422,
+        content={
+            "success": False,
+            "message": message,
+            "error": errors,
+            "timestamp": datetime.utcnow().isoformat(),
+            "requestId": getattr(request.state, "request_id", str(uuid.uuid4()))
+        }
+    )
+
+@app.exception_handler(Exception)
+async def generic_exception_handler(request, exc):
+    import traceback
+    traceback.print_exc()
+    return JSONResponse(
+        status_code=500,
+        content={
+            "success": False,
+            "message": "An unexpected server error occurred.",
+            "error": str(exc),
+            "timestamp": datetime.utcnow().isoformat(),
+            "requestId": getattr(request.state, "request_id", str(uuid.uuid4()))
+        }
+    )
+
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
+frontend_dist = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "dist")
+if os.path.exists(frontend_dist):
+    app.mount("/assets", StaticFiles(directory=os.path.join(frontend_dist, "assets")), name="assets")
 
 # --- Authentication Endpoints ---
 @app.post("/auth/register", response_model=schemas.User, tags=["Authentication"])
@@ -428,6 +501,10 @@ def sync_timetable(req: schemas.TimetableSyncRequest, current_user: models.User 
     
     for entry in req.timetable:
         sub_key = entry.subject.lower().strip()
+        # Ignore breaks when saving to database
+        if entry.type == "Break" or sub_key in ["break", "lunch break", "recess", "lunch"]:
+            continue
+            
         if sub_key in sub_map:
             subject = sub_map[sub_key]
         else:
@@ -463,6 +540,10 @@ def sync_timetable(req: schemas.TimetableSyncRequest, current_user: models.User 
         db.add(db_tt)
         
     db.commit()
+    
+    # Regenerate class sessions for active semester with the new timetable
+    _generate_sessions_for_active_semester(db, user_id)
+    
     return {"message": "Timetable synced successfully"}
 
 # --- Reports Endpoints ---
@@ -590,21 +671,44 @@ def mark_attendance(req: MarkAttendanceRequest, current_user: models.User = Depe
         
     date_obj = date.fromisoformat(req.date)
     
-    # Find existing record for this subject on this day
+    # Parse start time from HH:MM string
+    try:
+        h, m = map(int, req.start.split(':'))
+        start_time_obj = time(h, m)
+    except Exception:
+        start_time_obj = None
+    
+    # Find existing record for this subject on this day for the specific session
     att = db.query(models.Attendance).filter(
         models.Attendance.user_id == user_id, 
         models.Attendance.subject_id == subject.id,
-        models.Attendance.date == date_obj
+        models.Attendance.date == date_obj,
+        models.Attendance.start_time == start_time_obj
     ).first()
     
+    # Sync with ClassSession if it exists
+    session = db.query(models.ClassSession).filter(
+        models.ClassSession.user_id == user_id,
+        models.ClassSession.subject_id == subject.id,
+        models.ClassSession.date == date_obj,
+        models.ClassSession.start_time == start_time_obj
+    ).first()
+    
+    if session:
+        session.status = req.status
+        
     if att:
         att.status = req.status
+        if session:
+            att.session_id = session.id
     else:
         att = models.Attendance(
             user_id=user_id,
             subject_id=subject.id,
             date=date_obj,
-            status=req.status
+            start_time=start_time_obj,
+            status=req.status,
+            session_id=session.id if session else None
         )
         db.add(att)
     db.commit()
@@ -618,6 +722,10 @@ def get_state(current_user: models.User = Depends(auth.get_current_user), db: Se
     subjects = db.query(models.Subject).filter(models.Subject.user_id == user_id).all()
     timetable = db.query(models.Timetable).filter(models.Timetable.user_id == user_id).all()
     attendances = db.query(models.Attendance).filter(models.Attendance.user_id == user_id).all()
+    active_semester = db.query(models.Semester).filter(
+        models.Semester.user_id == user_id,
+        models.Semester.is_active == True
+    ).first()
     
     # Compute streak
     streak = _compute_streak(user_id, db)
@@ -648,9 +756,11 @@ def get_state(current_user: models.User = Depends(auth.get_current_user), db: Se
             logs[d_str] = []
         
         day_str = days_map[a.date.weekday()]
-        tt_entry = next((t for t in timetable if t.day == day_str and t.subject_id == a.subject_id), None)
         
-        start_str = tt_entry.start_time.strftime("%H:%M") if tt_entry else "00:00"
+        # Match using subject AND start_time (if available) to find the correct timetable entry for end_time
+        tt_entry = next((t for t in timetable if t.day == day_str and t.subject_id == a.subject_id and t.start_time == a.start_time), None)
+        
+        start_str = a.start_time.strftime("%H:%M") if a.start_time else "00:00"
         end_str = tt_entry.end_time.strftime("%H:%M") if tt_entry else "00:00"
         
         logs[d_str].append({
@@ -670,6 +780,13 @@ def get_state(current_user: models.User = Depends(auth.get_current_user), db: Se
             "college": user.college,
             "branch": user.branch
         },
+        "active_semester": {
+            "id": active_semester.id,
+            "name": active_semester.name,
+            "start_date": active_semester.start_date.isoformat() if active_semester.start_date else None,
+            "end_date": active_semester.end_date.isoformat() if active_semester.end_date else None,
+            "academic_year": active_semester.academic_year
+        } if active_semester else None,
         "globalStats": {
             "percentage": stats["percentage"],
             "present": stats["present"],
@@ -681,3 +798,750 @@ def get_state(current_user: models.User = Depends(auth.get_current_user), db: Se
         "timetable": tt_formatted,
         "attendanceLogs": logs
     }
+
+# --- Missing / Calendar-Driven Endpoints ---
+
+@app.get("/user/profile", response_model=schemas.User, tags=["User"])
+def get_user_profile(current_user: models.User = Depends(auth.get_current_user)):
+    return current_user
+
+@app.post("/auth/logout", tags=["Authentication"])
+def logout():
+    return {"message": "Successfully logged out"}
+
+@app.get("/analytics/streak", tags=["Analytics"])
+def get_streak(current_user: models.User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    streak = _compute_streak(current_user.id, db)
+    return {"streak": streak}
+
+@app.post("/semesters", response_model=schemas.SemesterOut, tags=["Semesters"])
+def create_semester(
+    sem: schemas.SemesterCreate,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db)
+):
+    db.query(models.Semester).filter(models.Semester.user_id == current_user.id).update({"is_active": False})
+    
+    db_sem = models.Semester(
+        user_id=current_user.id,
+        name=sem.name,
+        academic_year=sem.academic_year,
+        start_date=sem.start_date,
+        end_date=sem.end_date,
+        is_active=True
+    )
+    db.add(db_sem)
+    db.commit()
+    db.refresh(db_sem)
+    
+    # Generate scheduled class sessions
+    _generate_sessions_for_active_semester(db, current_user.id)
+    
+    return db_sem
+
+@app.get("/semesters", response_model=List[schemas.SemesterOut], tags=["Semesters"])
+def get_semesters(
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db)
+):
+    return db.query(models.Semester).filter(models.Semester.user_id == current_user.id).all()
+
+@app.get("/semesters/{semester_id}", response_model=schemas.SemesterOut, tags=["Semesters"])
+def get_semester(
+    semester_id: int,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db)
+):
+    sem = db.query(models.Semester).filter(
+        models.Semester.id == semester_id,
+        models.Semester.user_id == current_user.id
+    ).first()
+    if not sem:
+        raise HTTPException(status_code=404, detail="Semester not found")
+    return sem
+
+@app.put("/semesters/{semester_id}/activate", response_model=schemas.SemesterOut, tags=["Semesters"])
+def activate_semester(
+    semester_id: int,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db)
+):
+    sem = db.query(models.Semester).filter(
+        models.Semester.id == semester_id,
+        models.Semester.user_id == current_user.id
+    ).first()
+    if not sem:
+        raise HTTPException(status_code=404, detail="Semester not found")
+    
+    db.query(models.Semester).filter(models.Semester.user_id == current_user.id).update({"is_active": False})
+    sem.is_active = True
+    db.commit()
+    db.refresh(sem)
+    
+    # Generate scheduled class sessions for the newly active semester
+    _generate_sessions_for_active_semester(db, current_user.id)
+    
+    return sem
+
+@app.delete("/semesters/{semester_id}", tags=["Semesters"])
+def delete_semester(
+    semester_id: int,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db)
+):
+    sem = db.query(models.Semester).filter(
+        models.Semester.id == semester_id,
+        models.Semester.user_id == current_user.id
+    ).first()
+    if not sem:
+        raise HTTPException(status_code=404, detail="Semester not found")
+    db.delete(sem)
+    db.commit()
+    return {"message": "Semester and all associated data deleted successfully"}
+
+@app.post("/semesters/{semester_id}/holidays", response_model=schemas.HolidayOut, tags=["Holidays"])
+def create_holiday(
+    semester_id: int,
+    holiday: schemas.HolidayCreate,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db)
+):
+    sem = db.query(models.Semester).filter(
+        models.Semester.id == semester_id,
+        models.Semester.user_id == current_user.id
+    ).first()
+    if not sem:
+        raise HTTPException(status_code=404, detail="Semester not found")
+        
+    db_holiday = db.query(models.Holiday).filter(
+        models.Holiday.user_id == current_user.id,
+        models.Holiday.semester_id == semester_id,
+        models.Holiday.date == holiday.date
+    ).first()
+    if db_holiday:
+        raise HTTPException(status_code=400, detail="Holiday already exists on this date")
+        
+    db_holiday = models.Holiday(
+        user_id=current_user.id,
+        semester_id=semester_id,
+        date=holiday.date,
+        name=holiday.name,
+        type=holiday.type
+    )
+    db.add(db_holiday)
+    
+    # Mark any class sessions on this date as holiday status
+    db.query(models.ClassSession).filter(
+        models.ClassSession.user_id == current_user.id,
+        models.ClassSession.semester_id == semester_id,
+        models.ClassSession.date == holiday.date,
+        models.ClassSession.status == "upcoming"
+    ).update({"status": "holiday"})
+    
+    db.commit()
+    db.refresh(db_holiday)
+    return db_holiday
+
+@app.get("/semesters/{semester_id}/holidays", response_model=List[schemas.HolidayOut], tags=["Holidays"])
+def get_holidays(
+    semester_id: int,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db)
+):
+    sem = db.query(models.Semester).filter(
+        models.Semester.id == semester_id,
+        models.Semester.user_id == current_user.id
+    ).first()
+    if not sem:
+        raise HTTPException(status_code=404, detail="Semester not found")
+    return db.query(models.Holiday).filter(
+        models.Holiday.user_id == current_user.id,
+        models.Holiday.semester_id == semester_id
+    ).all()
+
+@app.delete("/semesters/{semester_id}/holidays/{holiday_id}", tags=["Holidays"])
+def delete_holiday(
+    semester_id: int,
+    holiday_id: int,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db)
+):
+    h = db.query(models.Holiday).filter(
+        models.Holiday.id == holiday_id,
+        models.Holiday.semester_id == semester_id,
+        models.Holiday.user_id == current_user.id
+    ).first()
+    if not h:
+        raise HTTPException(status_code=404, detail="Holiday not found")
+        
+    holiday_date = h.date
+    db.delete(h)
+    
+    # Revert any holiday class sessions on this date back to upcoming
+    db.query(models.ClassSession).filter(
+        models.ClassSession.user_id == current_user.id,
+        models.ClassSession.semester_id == semester_id,
+        models.ClassSession.date == holiday_date,
+        models.ClassSession.status == "holiday"
+    ).update({"status": "upcoming"})
+    
+    db.commit()
+    return {"message": "Holiday deleted successfully"}
+
+def _generate_sessions_for_active_semester(db: Session, user_id: int):
+    semester = db.query(models.Semester).filter(
+        models.Semester.user_id == user_id,
+        models.Semester.is_active == True
+    ).first()
+    if not semester:
+        return
+        
+    start_gen = semester.start_date
+    end_gen = semester.end_date
+    
+    # Delete existing upcoming class sessions for this active semester
+    db.query(models.ClassSession).filter(
+        models.ClassSession.user_id == user_id,
+        models.ClassSession.semester_id == semester.id,
+        models.ClassSession.date >= start_gen,
+        models.ClassSession.status == "upcoming"
+    ).delete()
+    db.commit()
+    
+    holidays = db.query(models.Holiday).filter(
+        models.Holiday.user_id == user_id,
+        models.Holiday.semester_id == semester.id
+    ).all()
+    holiday_dates = {h.date for h in holidays}
+    
+    days_map = {0: "Mon", 1: "Tue", 2: "Wed", 3: "Thu", 4: "Fri", 5: "Sat", 6: "Sun"}
+    
+    # Load user's active timetable entries where version_id is None
+    entries = db.query(models.Timetable).filter(
+        models.Timetable.user_id == user_id,
+        models.Timetable.version_id == None
+    ).all()
+    
+    if not entries:
+        # Fallback to load any timetable entries for the user if version_id is not used
+        entries = db.query(models.Timetable).filter(models.Timetable.user_id == user_id).all()
+        
+    from collections import defaultdict
+    day_entries = defaultdict(list)
+    for entry in entries:
+        day_entries[entry.day].append(entry)
+        
+    curr = start_gen
+    to_add = []
+    while curr <= end_gen:
+        day_str = days_map[curr.weekday()]
+        status = "holiday" if curr in holiday_dates else "upcoming"
+        
+        if day_str == "Sun":
+            curr += timedelta(days=1)
+            continue
+            
+        for entry in day_entries[day_str]:
+            # Check if there's already a session on this date and time
+            session_exists = db.query(models.ClassSession).filter(
+                models.ClassSession.user_id == user_id,
+                models.ClassSession.subject_id == entry.subject_id,
+                models.ClassSession.date == curr,
+                models.ClassSession.start_time == entry.start_time
+            ).first()
+            if not session_exists:
+                to_add.append(models.ClassSession(
+                    user_id=user_id,
+                    semester_id=semester.id,
+                    subject_id=entry.subject_id,
+                    date=curr,
+                    start_time=entry.start_time,
+                    end_time=entry.end_time,
+                    room=entry.room,
+                    session_type=entry.type or "Lecture",
+                    status=status,
+                    is_extra=False
+                ))
+        curr += timedelta(days=1)
+        
+    if to_add:
+        db.add_all(to_add)
+        db.commit()
+
+def _generate_sessions_for_version(db: Session, user_id: int, version: models.TimetableVersion):
+    semester = db.query(models.Semester).filter(models.Semester.id == version.semester_id, models.Semester.user_id == user_id).first()
+    if not semester:
+        return
+        
+    start_gen = max(version.effective_from, semester.start_date)
+    end_gen = semester.end_date
+    
+    # Delete existing upcoming class sessions on or after start_gen
+    db.query(models.ClassSession).filter(
+        models.ClassSession.user_id == user_id,
+        models.ClassSession.semester_id == semester.id,
+        models.ClassSession.date >= start_gen,
+        models.ClassSession.status == "upcoming"
+    ).delete()
+    db.commit()
+    
+    holidays = db.query(models.Holiday).filter(
+        models.Holiday.user_id == user_id,
+        models.Holiday.semester_id == semester.id
+    ).all()
+    holiday_dates = {h.date for h in holidays}
+    
+    days_map = {0: "Mon", 1: "Tue", 2: "Wed", 3: "Thu", 4: "Fri", 5: "Sat", 6: "Sun"}
+    
+    entries = db.query(models.Timetable).filter(models.Timetable.version_id == version.id).all()
+    
+    from collections import defaultdict
+    day_entries = defaultdict(list)
+    for entry in entries:
+        day_entries[entry.day].append(entry)
+        
+    curr = start_gen
+    to_add = []
+    while curr <= end_gen:
+        day_str = days_map[curr.weekday()]
+        status = "holiday" if curr in holiday_dates else "upcoming"
+        
+        for entry in day_entries[day_str]:
+            # check if there's already a session on this date and time
+            session_exists = db.query(models.ClassSession).filter(
+                models.ClassSession.user_id == user_id,
+                models.ClassSession.subject_id == entry.subject_id,
+                models.ClassSession.date == curr,
+                models.ClassSession.start_time == entry.start_time
+            ).first()
+            if not session_exists:
+                to_add.append(models.ClassSession(
+                    user_id=user_id,
+                    semester_id=semester.id,
+                    subject_id=entry.subject_id,
+                    date=curr,
+                    start_time=entry.start_time,
+                    end_time=entry.end_time,
+                    room=entry.room,
+                    session_type=entry.type or "Lecture",
+                    status=status,
+                    is_extra=False
+                ))
+        curr += timedelta(days=1)
+        
+    if to_add:
+        db.add_all(to_add)
+        db.commit()
+
+@app.post("/timetable/versions", response_model=schemas.TimetableVersionOut, tags=["Timetable Versions"])
+def create_timetable_version(
+    version: schemas.TimetableVersionCreate,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db)
+):
+    sem = db.query(models.Semester).filter(
+        models.Semester.id == version.semester_id,
+        models.Semester.user_id == current_user.id
+    ).first()
+    if not sem:
+        raise HTTPException(status_code=404, detail="Semester not found")
+        
+    db_version = models.TimetableVersion(
+        user_id=current_user.id,
+        semester_id=version.semester_id,
+        label=version.label,
+        effective_from=version.effective_from
+    )
+    db.add(db_version)
+    db.commit()
+    db.refresh(db_version)
+    
+    import random
+    from datetime import time as dt_time
+    
+    existing_subjects = db.query(models.Subject).filter(models.Subject.user_id == current_user.id).all()
+    sub_map = {s.name.lower().strip(): s for s in existing_subjects}
+    
+    for entry in version.timetable:
+        sub_key = entry.subject.lower().strip()
+        if sub_key in sub_map:
+            subject = sub_map[sub_key]
+        else:
+            colors = ["#cdbdff", "#40e56c", "#ffb3ae", "#7c4dff", "#02c953", "#ffdad7"]
+            color = random.choice(colors)
+            subject = models.Subject(
+                user_id=current_user.id,
+                name=entry.subject,
+                code="CS-" + str(random.randint(100, 999)),
+                prof=entry.prof,
+                color=color,
+                credits=3
+            )
+            db.add(subject)
+            db.commit()
+            db.refresh(subject)
+            sub_map[sub_key] = subject
+            
+        start_parts = [int(p) for p in entry.start.split(":")]
+        end_parts = [int(p) for p in entry.end.split(":")]
+        start_time = dt_time(start_parts[0], start_parts[1])
+        end_time = dt_time(end_parts[0], end_parts[1])
+        
+        db_tt = models.Timetable(
+            user_id=current_user.id,
+            subject_id=subject.id,
+            day=entry.day,
+            start_time=start_time,
+            end_time=end_time,
+            room=entry.room,
+            type=entry.type,
+            version_id=db_version.id
+        )
+        db.add(db_tt)
+        
+    db.commit()
+    
+    _generate_sessions_for_version(db, current_user.id, db_version)
+    
+    return db_version
+
+@app.get("/timetable/versions", response_model=List[schemas.TimetableVersionOut], tags=["Timetable Versions"])
+def get_timetable_versions(
+    semester_id: int,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db)
+):
+    return db.query(models.TimetableVersion).filter(
+        models.TimetableVersion.user_id == current_user.id,
+        models.TimetableVersion.semester_id == semester_id
+    ).all()
+
+@app.get("/sessions", response_model=List[schemas.ClassSessionOut], tags=["Class Sessions"])
+def get_class_sessions(
+    start_date: date,
+    end_date: date,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db)
+):
+    sessions = db.query(models.ClassSession).filter(
+        models.ClassSession.user_id == current_user.id,
+        models.ClassSession.date >= start_date,
+        models.ClassSession.date <= end_date
+    ).order_by(models.ClassSession.date.asc(), models.ClassSession.start_time.asc()).all()
+    
+    out = []
+    for s in sessions:
+        out.append(schemas.ClassSessionOut(
+            id=s.id,
+            date=s.date,
+            start_time=s.start_time,
+            end_time=s.end_time,
+            room=s.room,
+            session_type=s.session_type,
+            status=s.status,
+            is_extra=s.is_extra,
+            subject_id=s.subject_id,
+            subject_name=s.subject.name,
+            subject_color=s.subject.color,
+            subject_prof=s.subject.prof
+        ))
+    return out
+
+@app.post("/sessions/{session_id}/mark", response_model=schemas.ClassSessionOut, tags=["Class Sessions"])
+def mark_class_session(
+    session_id: int,
+    req: schemas.MarkSessionRequest,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db)
+):
+    s = db.query(models.ClassSession).filter(
+        models.ClassSession.id == session_id,
+        models.ClassSession.user_id == current_user.id
+    ).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Class session not found")
+        
+    s.status = req.status
+    
+    att = db.query(models.Attendance).filter(
+        models.Attendance.session_id == s.id,
+        models.Attendance.user_id == current_user.id
+    ).first()
+    
+    if not att:
+        att = db.query(models.Attendance).filter(
+            models.Attendance.user_id == current_user.id,
+            models.Attendance.subject_id == s.subject_id,
+            models.Attendance.date == s.date
+        ).first()
+        
+    if att:
+        att.status = req.status
+        att.session_id = s.id
+    else:
+        att = models.Attendance(
+            user_id=current_user.id,
+            subject_id=s.subject_id,
+            date=s.date,
+            status=req.status,
+            session_id=s.id
+        )
+        db.add(att)
+        
+    db.commit()
+    db.refresh(s)
+    
+    return schemas.ClassSessionOut(
+        id=s.id,
+        date=s.date,
+        start_time=s.start_time,
+        end_time=s.end_time,
+        room=s.room,
+        session_type=s.session_type,
+        status=s.status,
+        is_extra=s.is_extra,
+        subject_id=s.subject_id,
+        subject_name=s.subject.name,
+        subject_color=s.subject.color,
+        subject_prof=s.subject.prof
+    )
+
+@app.post("/sessions/extra", response_model=schemas.ClassSessionOut, tags=["Class Sessions"])
+def create_extra_class_session(
+    extra: schemas.ExtraClassCreate,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db)
+):
+    sem = db.query(models.Semester).filter(
+        models.Semester.id == extra.semester_id,
+        models.Semester.user_id == current_user.id
+    ).first()
+    if not sem:
+        raise HTTPException(status_code=404, detail="Semester not found")
+        
+    sub = db.query(models.Subject).filter(
+        models.Subject.id == extra.subject_id,
+        models.Subject.user_id == current_user.id
+    ).first()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Subject not found")
+        
+    session_exists = db.query(models.ClassSession).filter(
+        models.ClassSession.user_id == current_user.id,
+        models.ClassSession.subject_id == extra.subject_id,
+        models.ClassSession.date == extra.date,
+        models.ClassSession.start_time == extra.start_time
+    ).first()
+    if session_exists:
+        raise HTTPException(status_code=400, detail="Class session already exists at this date and time")
+        
+    s = models.ClassSession(
+        user_id=current_user.id,
+        semester_id=extra.semester_id,
+        subject_id=extra.subject_id,
+        date=extra.date,
+        start_time=extra.start_time,
+        end_time=extra.end_time,
+        room=extra.room,
+        session_type=extra.session_type or "Extra",
+        status="upcoming",
+        is_extra=True
+    )
+    db.add(s)
+    db.commit()
+    db.refresh(s)
+    
+    return schemas.ClassSessionOut(
+        id=s.id,
+        date=s.date,
+        start_time=s.start_time,
+        end_time=s.end_time,
+        room=s.room,
+        session_type=s.session_type,
+        status=s.status,
+        is_extra=s.is_extra,
+        subject_id=s.subject_id,
+        subject_name=s.subject.name,
+        subject_color=s.subject.color,
+        subject_prof=s.subject.prof
+    )
+
+# ============================================================================
+# AI OCR TIMETABLE PARSER (Gemini 2.5 Flash)
+# ============================================================================
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL   = "gemini-2.5-flash"
+GEMINI_URL     = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+
+TIMETABLE_OCR_PROMPT = """You are an expert academic timetable parser.
+Analyze the provided timetable image or PDF and extract ALL class entries.
+
+Return ONLY a valid JSON object (no markdown, no explanation) with this exact structure:
+{
+  "timetable": [
+    {
+      "day": "Mon",
+      "subject": "Subject Name",
+      "start": "09:00",
+      "end": "10:30",
+      "room": "Room 101",
+      "prof": "Prof. Name",
+      "type": "Lecture"
+    }
+  ],
+  "total_classes": 12,
+  "message": "Successfully extracted N classes"
+}
+
+Rules:
+- day must be one of: Mon, Tue, Wed, Thu, Fri, Sat
+- start and end must be in HH:MM 24-hour format (e.g. 09:00, 14:30)
+- type must be one of: Lecture, Practical, Hybrid, Tutorial, Break
+- If room or prof is not visible, use empty string ""
+- If a cell is empty or Free, skip it
+- Return every detected class entry, including lab sessions (usually marked as Practical/Lab) and breaks (like recess, lunch, tea breaks, which should have type: "Break" and subject: "Break" or "Lunch Break").
+"""
+
+@app.post("/timetable/ocr", tags=["Timetable"])
+async def ocr_timetable(
+    file: UploadFile = File(...),
+    current_user: models.User = Depends(auth.get_current_user)
+):
+    """
+    Upload a timetable image (PNG/JPEG/WebP) or PDF.
+    Gemini AI will parse it and return a structured list of class entries.
+    """
+    api_key = os.getenv("GEMINI_API_KEY", GEMINI_API_KEY)
+    if not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="Gemini API key not configured. Set GEMINI_API_KEY in your .env file."
+        )
+
+    file_bytes = await file.read()
+    encoded = base64.b64encode(file_bytes).decode("utf-8")
+
+    mime_type = file.content_type or "image/png"
+    if file.filename and file.filename.lower().endswith(".pdf"):
+        mime_type = "application/pdf"
+
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": TIMETABLE_OCR_PROMPT},
+                    {
+                        "inlineData": {
+                            "mimeType": mime_type,
+                            "data": encoded
+                        }
+                    }
+                ]
+            }
+        ],
+        "generationConfig": {
+            "response_mime_type": "application/json",
+            "temperature": 0.1
+        }
+    }
+
+    headers = {"Content-Type": "application/json"}
+    
+    models_to_try = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-2.5-flash-lite"]
+    gemini_response = None
+    last_error = None
+    successful_model = None
+
+    for model in models_to_try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+        try:
+            import urllib.request as ureq
+            req = ureq.Request(
+                url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers=headers,
+                method="POST"
+            )
+            with ureq.urlopen(req, timeout=120) as resp:
+                gemini_response = json.loads(resp.read().decode("utf-8"))
+                successful_model = model
+                break
+        except Exception as e:
+            error_msg = str(e)
+            if hasattr(e, 'read'):
+                try:
+                    error_msg = e.read().decode("utf-8")
+                except Exception:
+                    pass
+            print(f"Gemini API call failed for model {model}: {error_msg}")
+            last_error = error_msg
+
+    if not gemini_response:
+        raise HTTPException(status_code=500, detail=f"Gemini OCR failed: {last_error}")
+
+    try:
+        candidates = gemini_response.get("candidates", [])
+        if not candidates:
+            raise HTTPException(status_code=500, detail="Gemini returned no candidates")
+
+        raw_text = candidates[0]["content"]["parts"][0]["text"]
+        parsed = json.loads(raw_text)
+        timetable = parsed.get("timetable", [])
+
+        valid_days = {"Mon", "Tue", "Wed", "Thu", "Fri", "Sat"}
+        valid_types = {"Lecture", "Practical", "Hybrid", "Tutorial", "Break"}
+        cleaned = []
+        for entry in timetable:
+            day = entry.get("day", "").strip()
+            subject = entry.get("subject", "").strip()
+            start = entry.get("start", "").strip()
+            end = entry.get("end", "").strip()
+            if day in valid_days and subject and start and end:
+                cleaned.append({
+                    "day": day,
+                    "subject": subject,
+                    "start": start,
+                    "end": end,
+                    "room": entry.get("room", "") or "",
+                    "prof": entry.get("prof", "") or "",
+                    "type": entry.get("type", "Lecture") if entry.get("type") in valid_types else "Lecture"
+                })
+
+        return {
+            "timetable": cleaned,
+            "total_classes": len(cleaned),
+            "message": f"AI OCR extracted {len(cleaned)} classes from your timetable",
+            "model": successful_model
+        }
+
+    except HTTPException:
+        raise
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to parse Gemini JSON response: {str(e)}")
+    except Exception as e:
+        error_msg = str(e)
+        if hasattr(e, 'read'):
+            try:
+                error_msg = e.read().decode("utf-8")
+            except Exception:
+                pass
+        print("GEMINI ERROR:", error_msg)
+        raise HTTPException(status_code=500, detail=f"Gemini OCR failed: {error_msg}")
+
+# SPA Fallback Routes (Must be defined at the bottom to avoid intercepting specific API routes)
+if os.path.exists(frontend_dist):
+    @app.get("/", tags=["Root"])
+    def read_root():
+        return FileResponse(os.path.join(frontend_dist, "index.html"))
+        
+    @app.get("/{catchall:path}", tags=["Root"])
+    def serve_spa(catchall: str):
+        file_path = os.path.join(frontend_dist, catchall)
+        if os.path.exists(file_path) and os.path.isfile(file_path):
+            return FileResponse(file_path)
+        return FileResponse(os.path.join(frontend_dist, "index.html"))
+else:
+    @app.get("/", tags=["Root"])
+    def read_root():
+        return {"message": "Welcome to AttendWise API. Frontend build not found. Visit /docs for Swagger UI."}

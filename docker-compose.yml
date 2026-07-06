@@ -1,0 +1,410 @@
+# Docker Compose for AttendWise Production Deployment
+# Multi-service orchestration with monitoring, reverse proxy, and database clustering
+
+version: '3.8'
+
+services:
+  # Main backend service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+        - VCS_REF=${VCS_REF:-latest}
+    container_name: attendwise-backend
+    restart: unless-stopped
+    environment:
+      # Database configuration
+      DATABASE_URL: "postgresql://postgres:${POSTGRES_PASSWORD:-secret}@postgres:5432/attendwise"
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-20}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-10}
+      DB_POOL_TIMEOUT: ${DB_POOL_TIMEOUT:-30}
+
+      # Redis configuration
+      REDIS_URL: "redis://redis:6379/0"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+
+      # Security
+      SECRET_KEY: ${SECRET_KEY:-change-this-in-production}
+      SECRET_KEY_BASE64: ${SECRET_KEY_BASE64:-}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://frontend:3000}
+
+      # AI Services
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+
+      # Application settings
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      GUNICORN_WORKERS: ${GUNICORN_WORKERS:-4}
+      GUNICORN_TIMEOUT: ${GUNICORN_TIMEOUT:-120}
+
+      # File upload limits
+      MAX_UPLOAD_SIZE: ${MAX_UPLOAD_SIZE:-10485760}
+      UPLOAD_DIR: /app/uploads
+
+      # Performance
+      UVICORN_WORKERS: ${UVICORN_WORKERS:-4}
+
+      # Monitoring
+      ENABLE_METRICS: ${ENABLE_METRICS:-true}
+      METRICS_PORT: ${METRICS_PORT:-9090}
+
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/logs:/app/logs
+      - ./backend/uploads:/app/uploads
+      - ./backend/cache:/app/cache
+      - ./backend/data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    networks:
+      - attendwise-network
+    configs:
+      - source: backend/gunicorn_config.py
+        target: /app/gunicorn_config.py
+      - source: backend/.env.production
+        target: /app/backend/.env.production
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+
+  # Frontend service
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      target: production
+      args:
+        - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+        - VITE_API_URL: ${VITE_API_URL:-/api}
+        - VITE_BACKEND_URL: ${VITE_BACKEND_URL:-http://localhost:8000}
+    container_name: attendwise-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - VITE_API_URL=/api
+      - VITE_BACKEND_URL=http://localhost:8000
+      - CHROME_DEVTOOLS=false
+    volumes:
+      - ./dist:/app/dist
+      - /app/node_modules
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - attendwise-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+      restart_policy:
+        condition: any
+        delay: 10s
+        max_attempts: 2
+        window: 300s
+
+  # PostgreSQL database with backup capabilities
+  postgres:
+    image: postgres:15-alpine
+    container_name: attendwise-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: attendwise
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secret}
+      POSTGRES_INITDB_ARGS: "--auth=md5"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d attendwise"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - attendwise-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 180s
+
+  # Redis cache and session store
+  redis:
+    image: redis:7-alpine
+    container_name: attendwise-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-} --maxmemory 512mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - attendwise-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 2
+        window: 120s
+
+  # Frontend reverse proxy with SSL
+  nginx:
+    image: nginx:alpine
+    container_name: attendwise-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx.conf.d:/etc/nginx/conf.d
+      - ./ssl:/etc/nginx/ssl:ro
+      - ./frontend/dist:/usr/share/nginx/html/frontend
+      - ./frontend/static:/usr/share/nginx/html/static
+      - ./logs/nginx:/var/log/nginx
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    networks:
+      - attendwise-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+      restart_policy:
+        condition: any
+        delay: 10s
+        max_attempts: 2
+        window: 300s
+
+  # Monitoring and observability stack
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: attendwise-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-admin-api'
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - attendwise-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+      restart_policy:
+        condition: on-failure
+
+  # Grafana for visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: attendwise-grafana
+    restart: unless-stopped
+    ports:
+      - "3002:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_SECURITY_ADMIN_USER: admin
+      GF_INSTALL_PLUGINS: "grafana-piechart-panel,grafana-worldmap-panel"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    networks:
+      - attendwise-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1.5G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Backup service for database
+  backup:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.backup
+    container_name: attendwise-backup
+    restart: 'no'
+    environment:
+      POSTGRES_URL: "postgresql://postgres:${POSTGRES_PASSWORD:-secret}@postgres:5432/attendwise"
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      S3_BUCKET: ${S3_BUCKET:-attendwise-backups}
+    volumes:
+      - ./backups:/backups
+      - ./scripts:/scripts
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - attendwise-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+      restart_policy:
+        condition: none
+
+  # File synchronization service (for static assets)
+  rclone:
+    image: rclone/rclone:latest
+    container_name: attendwise-rclone
+    restart: unless-stopped
+    volumes:
+      - ./backups:/backup
+      - ./rclone.conf:/config/rclone.conf
+    command: sync /backup s3:backup --config /config/rclone.conf --delete-after
+    depends_on:
+      backend:
+        condition: service_started
+    networks:
+      - attendwise-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+      restart_policy:
+        condition: none
+
+  # Load balancer (optional, for multiple instances)
+  # Uncomment if deploying multiple backend instances
+  # backend-lb:
+  #   image: nginx:alpine
+  #   container_name: attendwise-backend-lb
+  #   ports:
+  #     - "80:80"
+  #   volumes:
+  #     - ./nginx-lb.conf:/etc/nginx/nginx.conf
+  #   depends_on:
+  #     backend:
+  #       condition: service_healthy
+  #   networks:
+  #     - attendwise-network
+  #   deploy:
+  #     mode: global
+  #     resources:
+  #       limits:
+  #         cpus: '1.0'
+  #         memory: 1G
+
+# ========== Volumes for persistent data ==========
+volumes:
+  # Backend data volumes
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  backend_logs:
+    driver: local
+  backend_uploads:
+    driver: local
+  backend_cache:
+    driver: local
+  backend_data:
+    driver: local
+
+  # Monitoring volumes
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+  # Backup volumes
+  backups:
+    driver: local
+
+# ========== Network configuration ==========
+networks:
+  attendwise-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+          gateway: 172.20.0.1
+    driver_opts:
+      com.docker.network.bridge.name: attendwise-network
+
+# ========== Configuration files ==========
+configs:
+  backend/gunicorn_config.py:
+    file: ./backend/gunicorn_config.py
+  backend/.env.production:
+    file: ./backend/.env.production
