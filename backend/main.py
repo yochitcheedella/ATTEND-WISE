@@ -17,7 +17,7 @@ from .database import engine, get_db
 # Create database tables
 models.Base.metadata.create_all(bind=engine)
 
-# Simple SQLite migration for minimum_required_attendance column
+# Simple SQLite migration for minimum_required_attendance and academic_calendar columns
 from sqlalchemy import text
 try:
     with engine.begin() as conn:
@@ -25,6 +25,11 @@ try:
         columns = [row[1] for row in result.fetchall()]
         if "minimum_required_attendance" not in columns:
             conn.execute(text("ALTER TABLE subjects ADD COLUMN minimum_required_attendance FLOAT DEFAULT 75.0"))
+            
+        result_sem = conn.execute(text("PRAGMA table_info(semesters)"))
+        columns_sem = [row[1] for row in result_sem.fetchall()]
+        if "academic_calendar" not in columns_sem:
+            conn.execute(text("ALTER TABLE semesters ADD COLUMN academic_calendar TEXT"))
 except Exception as e:
     print("Migration warning:", e)
 
@@ -797,7 +802,8 @@ def get_state(current_user: models.User = Depends(auth.get_current_user), db: Se
             "name": active_semester.name,
             "start_date": active_semester.start_date.isoformat() if active_semester.start_date else None,
             "end_date": active_semester.end_date.isoformat() if active_semester.end_date else None,
-            "academic_year": active_semester.academic_year
+            "academic_year": active_semester.academic_year,
+            "academic_calendar": active_semester.academic_calendar
         } if active_semester else None,
         "globalStats": {
             "percentage": stats["percentage"],
@@ -826,6 +832,19 @@ def get_streak(current_user: models.User = Depends(auth.get_current_user), db: S
     streak = _compute_streak(current_user.id, db)
     return {"streak": streak}
 
+def _expand_date_range(start_str: str, end_str: str) -> List[date]:
+    try:
+        start_d = date.fromisoformat(start_str)
+        end_d = date.fromisoformat(end_str)
+        curr = start_d
+        res = []
+        while curr <= end_d:
+            res.append(curr)
+            curr += timedelta(days=1)
+        return res
+    except Exception:
+        return []
+
 @app.post("/semesters", response_model=schemas.SemesterOut, tags=["Semesters"])
 def create_semester(
     sem: schemas.SemesterCreate,
@@ -840,12 +859,106 @@ def create_semester(
         academic_year=sem.academic_year,
         start_date=sem.start_date,
         end_date=sem.end_date,
+        academic_calendar=sem.academic_calendar,
         is_active=True
     )
     db.add(db_sem)
     db.commit()
     db.refresh(db_sem)
     
+    # Populate Holidays from Academic Calendar if present (Checklist Section 1.6)
+    if sem.academic_calendar:
+        try:
+            cal = json.loads(sem.academic_calendar)
+            
+            # 1. Standard Holidays
+            for h in cal.get("holidays", []):
+                h_date = date.fromisoformat(h["date"])
+                db_hol = models.Holiday(
+                    user_id=current_user.id,
+                    semester_id=db_sem.id,
+                    date=h_date,
+                    name=h.get("name", "Holiday"),
+                    type="Holiday"
+                )
+                db.merge(db_hol)
+                
+            # 2. Mid Exams
+            for m in cal.get("midExams", []):
+                for d in _expand_date_range(m["start"], m["end"]):
+                    db_hol = models.Holiday(
+                        user_id=current_user.id,
+                        semester_id=db_sem.id,
+                        date=d,
+                        name=m.get("title", "Mid Exams"),
+                        type="Mid Exam"
+                    )
+                    db.merge(db_hol)
+
+            # 3. Lab Exams
+            for l in cal.get("labExams", []):
+                for d in _expand_date_range(l["start"], l["end"]):
+                    db_hol = models.Holiday(
+                        user_id=current_user.id,
+                        semester_id=db_sem.id,
+                        date=d,
+                        name=l.get("title", "Lab Exams"),
+                        type="Lab Exam"
+                    )
+                    db.merge(db_hol)
+                    
+            # 4. Semester Breaks
+            for b in cal.get("semesterBreak", []):
+                for d in _expand_date_range(b["start"], b["end"]):
+                    db_hol = models.Holiday(
+                        user_id=current_user.id,
+                        semester_id=db_sem.id,
+                        date=d,
+                        name=b.get("title", "Semester Break"),
+                        type="Semester Break"
+                    )
+                    db.merge(db_hol)
+                    
+            # 5. Final Exams
+            for e in cal.get("examDates", []):
+                for d in _expand_date_range(e["start"], e["end"]):
+                    db_hol = models.Holiday(
+                        user_id=current_user.id,
+                        semester_id=db_sem.id,
+                        date=d,
+                        name=e.get("title", "Semester Exams"),
+                        type="Semester Exam"
+                    )
+                    db.merge(db_hol)
+
+            # 6. Study Holidays
+            for s in cal.get("studyHolidays", []):
+                for d in _expand_date_range(s["start"], s["end"]):
+                    db_hol = models.Holiday(
+                        user_id=current_user.id,
+                        semester_id=db_sem.id,
+                        date=d,
+                        name=s.get("title", "Preparation Leave"),
+                        type="Study Holiday"
+                    )
+                    db.merge(db_hol)
+
+            # 7. Events (like Sports Day)
+            for ev in cal.get("events", []):
+                ev_date = date.fromisoformat(ev["date"])
+                db_hol = models.Holiday(
+                    user_id=current_user.id,
+                    semester_id=db_sem.id,
+                    date=ev_date,
+                    name=ev.get("title", "College Event"),
+                    type="Event"
+                )
+                db.merge(db_hol)
+                
+            db.commit()
+        except Exception as err:
+            print("Failed to auto-populate holidays from calendar:", err)
+            
     # Generate scheduled class sessions
     _generate_sessions_for_active_semester(db, current_user.id)
     
@@ -1026,6 +1139,15 @@ def _generate_sessions_for_active_semester(db: Session, user_id: int):
     ).all()
     holiday_dates = {h.date for h in holidays}
     
+    # Parse working Saturdays to override holiday check
+    working_saturdays = set()
+    if semester.academic_calendar:
+        try:
+            cal = json.loads(semester.academic_calendar)
+            working_saturdays = {date.fromisoformat(d) for d in cal.get("workingSaturdays", [])}
+        except Exception:
+            pass
+    
     days_map = {0: "Mon", 1: "Tue", 2: "Wed", 3: "Thu", 4: "Fri", 5: "Sat", 6: "Sun"}
     
     # Load user's active timetable entries where version_id is None
@@ -1047,7 +1169,7 @@ def _generate_sessions_for_active_semester(db: Session, user_id: int):
     to_add = []
     while curr <= end_gen:
         day_str = days_map[curr.weekday()]
-        status = "holiday" if curr in holiday_dates else "upcoming"
+        status = "holiday" if (curr in holiday_dates and curr not in working_saturdays) else "upcoming"
         
         if day_str == "Sun":
             curr += timedelta(days=1)
@@ -1540,6 +1662,140 @@ async def ocr_timetable(
                 pass
         print("GEMINI ERROR:", error_msg)
         raise HTTPException(status_code=500, detail=f"Gemini OCR failed: {error_msg}")
+
+CALENDAR_OCR_PROMPT = """You are an expert academic calendar parser.
+Analyze the provided academic calendar image or PDF and extract ALL key dates and events.
+
+Return ONLY a valid JSON object (no markdown, no explanations) with this exact structure:
+{
+  "semesterStart": "YYYY-MM-DD",
+  "semesterEnd": "YYYY-MM-DD",
+  "holidays": [
+    {"date": "YYYY-MM-DD", "name": "Name of holiday"}
+  ],
+  "midExams": [
+    {"title": "Mid Exams", "start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
+  ],
+  "labExams": [
+    {"title": "Lab Exams", "start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
+  ],
+  "semesterBreak": [
+    {"title": "Break", "start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
+  ],
+  "examDates": [
+    {"title": "Semester Exams", "start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
+  ],
+  "studyHolidays": [
+    {"title": "Preparation Leave", "start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
+  ],
+  "workingSaturdays": [
+    "YYYY-MM-DD"
+  ],
+  "events": [
+    {"title": "Sports Day", "date": "YYYY-MM-DD"}
+  ]
+}
+
+Rules:
+- All dates must be in YYYY-MM-DD format.
+- semesterStart and semesterEnd represent the absolute date boundaries of the academic semester.
+- Extract any public/national holidays, college holidays, festivals, or local holidays into "holidays".
+- Extract exam schedules (Mid Term, Lab, Practical, End Semester, Preparatory Leave/Study Holidays) into their corresponding arrays.
+- Extract semester breaks/holidays (e.g. Winter/Summer vacations, Puja holidays).
+- Extract Special Working Saturdays (where Monday or normal classes run) into "workingSaturdays".
+- Extract any college events (Sports Day, Annual Fest, Project review days) into "events" with title and date.
+"""
+
+@app.post("/semester/parse-calendar", tags=["Semesters"])
+async def parse_calendar(
+    file: UploadFile = File(...),
+    current_user: models.User = Depends(auth.get_current_user)
+):
+    """
+    Upload an academic calendar image (PNG/JPEG/WebP) or PDF.
+    Gemini AI will parse it and return a structured JSON configuration.
+    """
+    api_key = os.getenv("GEMINI_API_KEY", GEMINI_API_KEY)
+    if not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="Gemini API key not configured. Set GEMINI_API_KEY in your .env file."
+        )
+
+    file_bytes = await file.read()
+    encoded = base64.b64encode(file_bytes).decode("utf-8")
+
+    mime_type = file.content_type or "image/png"
+    if file.filename and file.filename.lower().endswith(".pdf"):
+        mime_type = "application/pdf"
+
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": CALENDAR_OCR_PROMPT},
+                    {
+                        "inlineData": {
+                            "mimeType": mime_type,
+                            "data": encoded
+                        }
+                    }
+                ]
+            }
+        ],
+        "generationConfig": {
+            "response_mime_type": "application/json",
+            "temperature": 0.1
+        }
+    }
+
+    url = f"{GEMINI_URL}?key={api_key}"
+    headers = {"Content-Type": "application/json"}
+
+    last_error = ""
+    gemini_response = None
+    successful_model = GEMINI_MODEL
+
+    try:
+        resp = requests.post(url, headers=headers, json=payload, timeout=60)
+        if resp.status_code == 200:
+            gemini_response = resp.json()
+        else:
+            last_error = f"API returned HTTP {resp.status_code}: {resp.text}"
+    except Exception as e:
+        last_error = str(e)
+
+    if not gemini_response:
+        raise HTTPException(status_code=500, detail=f"Gemini OCR failed: {last_error}")
+
+    try:
+        candidates = gemini_response.get("candidates", [])
+        if not candidates:
+            raise HTTPException(status_code=500, detail="Gemini returned no candidates")
+
+        raw_text = candidates[0]["content"]["parts"][0]["text"]
+        parsed = json.loads(raw_text)
+
+        return {
+            "semesterStart": parsed.get("semesterStart") or "",
+            "semesterEnd": parsed.get("semesterEnd") or "",
+            "holidays": parsed.get("holidays") or [],
+            "midExams": parsed.get("midExams") or [],
+            "labExams": parsed.get("labExams") or [],
+            "semesterBreak": parsed.get("semesterBreak") or [],
+            "examDates": parsed.get("examDates") or [],
+            "studyHolidays": parsed.get("studyHolidays") or [],
+            "workingSaturdays": parsed.get("workingSaturdays") or [],
+            "events": parsed.get("events") or [],
+            "model": successful_model
+        }
+
+    except HTTPException:
+        raise
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to parse Gemini JSON response: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Gemini calendar parsing failed: {str(e)}")
 
 # SPA Fallback Routes (Must be defined at the bottom to avoid intercepting specific API routes)
 if os.path.exists(frontend_dist):

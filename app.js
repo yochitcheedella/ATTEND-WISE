@@ -107,7 +107,8 @@ let appState = {
     leavePlans: [],
     notifications: [],
     timetableMode: "list",
-    activeSemester: null
+    activeSemester: null,
+    holidays: []
 };
 
 function getAuthHeaders() {
@@ -253,6 +254,23 @@ async function initAppState() {
             appState.timetable = data.timetable;
             appState.attendanceLogs = data.attendanceLogs;
             appState.activeSemester = data.active_semester;
+            if (appState.activeSemester) {
+                try {
+                    const holResponse = await fetch(`${API_BASE_URL}/semesters/${appState.activeSemester.id}/holidays`, {
+                        headers: getAuthHeaders()
+                    });
+                    if (holResponse.ok) {
+                        appState.holidays = await holResponse.json();
+                    } else {
+                        appState.holidays = [];
+                    }
+                } catch (holErr) {
+                    console.error("Failed to fetch holidays:", holErr);
+                    appState.holidays = [];
+                }
+            } else {
+                appState.holidays = [];
+            }
             hideAuthScreen();
         } else if (response.status === 401) {
             localStorage.removeItem("access_token");
@@ -2137,6 +2155,12 @@ function renderCalendarGrid() {
             return cellDate >= sDate && cellDate <= eDate;
         });
         
+        // Highlight academic calendar events
+        const holidayEvent = appState.holidays && appState.holidays.find(h => {
+            const hDateStr = typeof h.date === "string" ? h.date : h.date.toISOString().split("T")[0];
+            return hDateStr === dateKey;
+        });
+        
         const cell = document.createElement("div");
         
         let cellClass = "h-10 flex flex-col items-center justify-center relative cursor-pointer hover:bg-surface-container-highest/20 rounded-xl transition-colors text-[12px] font-semibold";
@@ -2144,9 +2168,18 @@ function renderCalendarGrid() {
             cellClass = "h-10 flex flex-col items-center justify-center relative cursor-pointer bg-primary-container/20 rounded-xl border border-primary/40 text-primary font-extrabold shadow-[0_0_8px_rgba(124,77,255,0.2)]";
         } else if (isToday) {
             cellClass = "h-10 flex flex-col items-center justify-center relative cursor-pointer bg-zinc-900 border border-outline-variant/60 rounded-xl text-on-surface font-extrabold";
-        }
-        
-        if (isLeaveDay && !isSelected) {
+        } else if (holidayEvent) {
+            const type = holidayEvent.type || "Holiday";
+            if (type.includes("Exam")) {
+                cellClass += " bg-error/10 border border-error/30 text-error";
+            } else if (type.includes("Break") || type.includes("Study")) {
+                cellClass += " bg-warning/10 border border-warning/30 text-warning";
+            } else if (type.includes("Event")) {
+                cellClass += " bg-primary/10 border border-primary/30 text-primary";
+            } else {
+                cellClass += " bg-surface-container-high/50 border border-outline-variant/30 text-on-surface-variant/70";
+            }
+        } else if (isLeaveDay) {
             cellClass += " border border-dashed border-primary/40 text-primary bg-primary/5";
         }
         
@@ -2227,6 +2260,28 @@ function renderCalendarSelectedDayDetails() {
             <span class="text-[9px] font-bold">Planned Absence</span>
         `;
         classesContainer.appendChild(leaveItem);
+    }
+    
+    // Highlight academic calendar events inside detail panel
+    const academicHoliday = appState.holidays && appState.holidays.find(h => {
+        const hDateStr = typeof h.date === "string" ? h.date : h.date.toISOString().split("T")[0];
+        return hDateStr === selectedCalendarDateStr;
+    });
+    
+    if (academicHoliday) {
+        const holidayItem = document.createElement("div");
+        holidayItem.className = `p-3 rounded-xl flex items-center justify-between mb-3 border border-outline-variant bg-surface-container`;
+        holidayItem.innerHTML = `
+            <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-primary text-[18px]">festival</span>
+                <div>
+                    <p class="font-bold text-[12px] leading-tight">${academicHoliday.name}</p>
+                    <p class="text-[9px] uppercase font-bold tracking-wider text-primary">${academicHoliday.type}</p>
+                </div>
+            </div>
+            <span class="text-[9px] font-bold text-on-surface-variant">Academic Event</span>
+        `;
+        classesContainer.appendChild(holidayItem);
     }
     
     const dayLogs = appState.attendanceLogs[selectedCalendarDateStr];
@@ -3148,159 +3203,411 @@ function onClassPeriodSelectChange() {
 // ============================================================================
 // 13. DRAG-AND-DROP FILE UPLOADER & OCR PARSING
 // ============================================================================
+// 13. ONBOARDING WIZARD & CALENDAR PARSER CONTROLLERS
+// ============================================================================
 
-let selectedOcrFile = null;
+let selectedObTtFile = null;
+let selectedObCalFile = null;
+let currentOnboardingStep = 1;
+let parsedCalendarData = null;
 
-function handleOcrFileDrop(e) {
+function goToOnboardingStep(stepNum) {
+    currentOnboardingStep = stepNum;
+    
+    // Hide all steps
+    document.getElementById("ob-step-1").classList.add("hidden");
+    document.getElementById("ob-step-2").classList.add("hidden");
+    document.getElementById("ob-step-3").classList.add("hidden");
+    document.getElementById("ob-step-4").classList.add("hidden");
+    
+    // Show current step
+    document.getElementById(`ob-step-${stepNum}`).classList.remove("hidden");
+    
+    // Update step dots
+    for (let i = 1; i <= 4; i++) {
+        const dot = document.getElementById(`step-dot-${i}`);
+        if (!dot) continue;
+        const span = dot.querySelector("span");
+        if (!span) continue;
+        
+        if (i < stepNum) {
+            dot.className = "text-success flex items-center gap-1";
+            span.className = "w-5 h-5 rounded-full bg-success/20 flex items-center justify-center text-[10px]";
+            span.innerHTML = '<span class="material-symbols-outlined text-[12px]">check</span>';
+        } else if (i === stepNum) {
+            dot.className = "text-primary flex items-center gap-1";
+            span.className = "w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center text-[10px]";
+            span.textContent = i;
+        } else {
+            dot.className = "flex items-center gap-1 text-on-surface-variant/50";
+            span.className = "w-5 h-5 rounded-full bg-surface-container-highest flex items-center justify-center text-[10px]";
+            span.textContent = i;
+        }
+    }
+    
+    // Prefill Step 1 details if available
+    if (stepNum === 1 && appState.profile) {
+        document.getElementById("ob-college").value = appState.profile.college || "";
+        document.getElementById("ob-branch").value = appState.profile.branch || "";
+        document.getElementById("ob-semester").value = appState.profile.term || "Semester 1";
+        document.getElementById("ob-goal").value = appState.profile.targetGoal || 75;
+    }
+}
+
+// Timetable drag/drop
+function handleObTtDrop(e) {
     e.preventDefault();
-    const dropzone = document.getElementById("ocr-dropzone");
+    const dropzone = document.getElementById("ob-tt-dropzone");
     if (dropzone) dropzone.classList.remove("border-primary", "bg-primary/5");
-    
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-        updateOcrFileStatus(e.dataTransfer.files[0]);
+        updateObTtFileStatus(e.dataTransfer.files[0]);
     }
 }
-
-function handleOcrFileSelect(e) {
+function handleObTtSelect(e) {
     if (e.target.files && e.target.files.length > 0) {
-        updateOcrFileStatus(e.target.files[0]);
+        updateObTtFileStatus(e.target.files[0]);
     }
 }
-
-function updateOcrFileStatus(file) {
-    selectedOcrFile = file;
+function updateObTtFileStatus(file) {
+    selectedObTtFile = file;
+    const dropzone = document.getElementById("ob-tt-dropzone");
+    const statusBox = document.getElementById("ob-tt-status");
+    const scanBtn = document.getElementById("ob-tt-scan-btn");
     
-    const dropzone = document.getElementById("ocr-dropzone");
-    const statusBox = document.getElementById("ocr-file-status");
-    const submitBtn = document.getElementById("ocr-submit-btn");
-    
-    const filenameEl = document.getElementById("ocr-filename");
-    const filesizeEl = document.getElementById("ocr-filesize");
-    const fileIcon = document.getElementById("ocr-file-icon");
+    const filenameEl = document.getElementById("ob-tt-filename");
+    const filesizeEl = document.getElementById("ob-tt-filesize");
     
     if (file) {
         dropzone.classList.add("hidden");
         statusBox.classList.remove("hidden");
-        submitBtn.classList.remove("hidden");
+        scanBtn.disabled = false;
         
         filenameEl.textContent = file.name;
         filesizeEl.textContent = `${(file.size / 1024).toFixed(1)} KB`;
+    }
+}
+
+// Calendar drag/drop
+function handleObCalDrop(e) {
+    e.preventDefault();
+    const dropzone = document.getElementById("ob-cal-dropzone");
+    if (dropzone) dropzone.classList.remove("border-primary", "bg-primary/5");
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        updateObCalFileStatus(e.dataTransfer.files[0]);
+    }
+}
+function handleObCalSelect(e) {
+    if (e.target.files && e.target.files.length > 0) {
+        updateObCalFileStatus(e.target.files[0]);
+    }
+}
+function updateObCalFileStatus(file) {
+    selectedObCalFile = file;
+    const dropzone = document.getElementById("ob-cal-dropzone");
+    const statusBox = document.getElementById("ob-cal-status");
+    const scanBtn = document.getElementById("ob-cal-scan-btn");
+    
+    const filenameEl = document.getElementById("ob-cal-filename");
+    const filesizeEl = document.getElementById("ob-cal-filesize");
+    
+    if (file) {
+        dropzone.classList.add("hidden");
+        statusBox.classList.remove("hidden");
+        scanBtn.disabled = false;
         
-        if (file.type === "application/pdf") {
-            fileIcon.textContent = "picture_as_pdf";
-            fileIcon.className = "material-symbols-outlined text-error text-[20px]";
-        } else {
-            fileIcon.textContent = "image";
-            fileIcon.className = "material-symbols-outlined text-secondary text-[20px]";
-        }
+        filenameEl.textContent = file.name;
+        filesizeEl.textContent = `${(file.size / 1024).toFixed(1)} KB`;
     }
 }
 
-function removeSelectedOcrFile(e) {
-    if (e) {
-        e.preventDefault();
-        e.stopPropagation();
-    }
+async function startTimetableScanning() {
+    if (!selectedObTtFile) return;
     
-    selectedOcrFile = null;
-    document.getElementById("ocr-file-input").value = "";
-    
-    document.getElementById("ocr-dropzone").classList.remove("hidden");
-    document.getElementById("ocr-file-status").classList.add("hidden");
-    document.getElementById("ocr-submit-btn").classList.add("hidden");
-}
-
-async function startOcrFileScanning() {
-    if (!selectedOcrFile) return;
-
     const loader = document.getElementById("ocr-scanning-loader");
     const loaderText = document.getElementById("ocr-loader-text");
-    loader.classList.remove("hidden");
-    if (loaderText) loaderText.textContent = "Sending to Gemini AI...";
-
-    const submitBtn = document.getElementById("ocr-submit-btn");
-    submitBtn.disabled = true;
-    submitBtn.classList.add("opacity-50");
-
+    if (loader) loader.classList.remove("hidden");
+    if (loaderText) loaderText.textContent = "AI Timetable Parsing with Gemini...";
+    
+    const scanBtn = document.getElementById("ob-tt-scan-btn");
+    if (scanBtn) scanBtn.disabled = true;
+    
     const formData = new FormData();
-    formData.append("file", selectedOcrFile);
-
+    formData.append("file", selectedObTtFile);
+    
     try {
         const response = await fetch(`${API_BASE_URL}/timetable/ocr`, {
             method: "POST",
             headers: getAuthHeaders(),
             body: formData
         });
-
-        loader.classList.add("hidden");
-        submitBtn.disabled = false;
-        submitBtn.classList.remove("opacity-50");
-
+        
+        if (loader) loader.classList.add("hidden");
+        if (scanBtn) scanBtn.disabled = false;
+        
         if (!response.ok) {
             const err = await response.json().catch(() => ({ detail: "Unknown error" }));
-            showToast("OCR Failed", err.detail || "Gemini could not parse the timetable.", "error");
+            showToast("Parsing Failed", err.detail || "Gemini could not read timetable.", "error");
             return;
         }
-
+        
         const data = await response.json();
         if (!data.timetable || data.timetable.length === 0) {
-            showToast("No Classes Found", "Gemini could not detect any class entries. Try a clearer image.", "warning");
+            showToast("No Classes Found", "Gemini could not detect any class entries.", "warning");
             return;
         }
-
-        // Store timetable temporarily
-        appState.tempTimetable = data.timetable;
         
-        // Populate preview table
-        const previewBody = document.getElementById("ocr-preview-table-body");
-        previewBody.innerHTML = "";
-        data.timetable.forEach(entry => {
-            const tr = document.createElement("tr");
-            tr.className = "border-b border-outline-variant/10 py-1 text-on-surface text-[11px]";
-            
-            // Format start/end time nicely for display
-            const timeStr = `${formatTimeAmPm(entry.start)} - ${formatTimeAmPm(entry.end)}`;
-            const typeBadgeColor = entry.type === 'Break' ? 'bg-outline-variant/20 text-on-surface-variant' : entry.type === 'Practical' ? 'bg-secondary/15 text-secondary border border-secondary/20' : 'bg-primary/10 text-primary border border-primary/20';
-            
-            tr.innerHTML = `
-                <td class="py-1.5 font-bold text-on-surface-variant">${entry.day}</td>
-                <td class="py-1.5 font-extrabold max-w-[120px] truncate">${entry.subject}</td>
-                <td class="py-1.5 font-semibold">${timeStr}</td>
-                <td class="py-1.5"><span class="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${typeBadgeColor}">${entry.type}</span></td>
-            `;
-            previewBody.appendChild(tr);
+        appState.tempTimetable = data.timetable;
+        showToast("Timetable Scanned ✨", `AI extracted ${data.total_classes} classes.`, "check_circle");
+        
+        goToOnboardingStep(3);
+    } catch (err) {
+        if (loader) loader.classList.add("hidden");
+        if (scanBtn) scanBtn.disabled = false;
+        console.error("Timetable parse error:", err);
+        showToast("Connection Error", "Could not reach timetable parser.", "error");
+    }
+}
+
+async function startCalendarScanning() {
+    if (!selectedObCalFile) return;
+    
+    const loader = document.getElementById("ocr-scanning-loader");
+    const loaderText = document.getElementById("ocr-loader-text");
+    if (loader) loader.classList.remove("hidden");
+    if (loaderText) loaderText.textContent = "AI Academic Calendar Parsing with Gemini...";
+    
+    const scanBtn = document.getElementById("ob-cal-scan-btn");
+    if (scanBtn) scanBtn.disabled = true;
+    
+    const formData = new FormData();
+    formData.append("file", selectedObCalFile);
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/semester/parse-calendar`, {
+            method: "POST",
+            headers: getAuthHeaders(),
+            body: formData
         });
         
-        // Expand modal width to max-w-2xl
-        const modalContainer = document.getElementById("ocrModal").querySelector(".max-w-md, .max-w-2xl");
-        if (modalContainer) {
-            modalContainer.classList.replace("max-w-md", "max-w-2xl");
+        if (loader) loader.classList.add("hidden");
+        if (scanBtn) scanBtn.disabled = false;
+        
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({ detail: "Unknown error" }));
+            showToast("Parsing Failed", err.detail || "Gemini could not read academic calendar.", "error");
+            return;
         }
         
-        // Switch Steps visibility
-        document.getElementById("ocr-step-1").classList.add("hidden");
-        document.getElementById("ocr-step-2").classList.remove("hidden");
+        const data = await response.json();
+        parsedCalendarData = data;
         
-        // Prefill dates if there's already an activeSemester
-        if (appState.activeSemester) {
-            document.getElementById("ocr-semester-start").value = appState.activeSemester.start_date;
-            document.getElementById("ocr-semester-end").value = appState.activeSemester.end_date;
-            onOcrDatesChange();
+        showToast("Calendar Scanned ✨", "Academic calendar data processed.", "check_circle");
+        
+        // Populate Verification Screen metrics
+        document.getElementById("ob-verify-start").textContent = data.semesterStart || "N/A";
+        document.getElementById("ob-verify-end").textContent = data.semesterEnd || "N/A";
+        document.getElementById("ob-verify-holidays").textContent = data.holidays.length;
+        document.getElementById("ob-verify-mid-exams").textContent = data.midExams.length;
+        document.getElementById("ob-verify-final-exams").textContent = data.examDates.length;
+        
+        // Calculate expected active working days
+        if (data.semesterStart && data.semesterEnd) {
+            const startD = new Date(data.semesterStart + "T00:00:00");
+            const endD = new Date(data.semesterEnd + "T00:00:00");
+            let workDays = 0;
+            
+            // Build set of holiday dates
+            const holDates = new Set(data.holidays.map(h => h.date));
+            // Add exam dates to exclusions
+            const addExclusion = (ranges) => {
+                ranges.forEach(r => {
+                    let d = new Date(r.start + "T00:00:00");
+                    const end = new Date(r.end + "T00:00:00");
+                    while (d <= end) {
+                        holDates.add(d.toISOString().split("T")[0]);
+                        d.setDate(d.getDate() + 1);
+                    }
+                });
+            };
+            addExclusion(data.midExams);
+            addExclusion(data.labExams);
+            addExclusion(data.semesterBreak);
+            addExclusion(data.examDates);
+            addExclusion(data.studyHolidays);
+            
+            // Override with working Saturdays
+            const workSats = new Set(data.workingSaturdays);
+            
+            let curr = new Date(startD);
+            while (curr <= endD) {
+                const dateStr = curr.toISOString().split("T")[0];
+                const day = curr.getDay();
+                
+                // Exclude Sundays
+                if (day !== 0) {
+                    if (workSats.has(dateStr) || !holDates.has(dateStr)) {
+                        workDays++;
+                    }
+                }
+                curr.setDate(curr.getDate() + 1);
+            }
+            document.getElementById("ob-verify-working-days").textContent = workDays;
         } else {
-            document.getElementById("ocr-semester-start").value = "";
-            document.getElementById("ocr-semester-end").value = "";
-            document.getElementById("ocr-calc-panel").classList.add("hidden");
+            document.getElementById("ob-verify-working-days").textContent = "-";
         }
         
-        showToast("Timetable Parsed ✨", `AI extracted ${data.total_classes} items. Please set your semester dates to proceed.`, "auto_awesome");
-        removeSelectedOcrFile();
+        // Populate subject schedule list preview
+        const verifySubjects = document.getElementById("ob-verify-subjects-list");
+        verifySubjects.innerHTML = "";
+        
+        const timetableToPreview = appState.tempTimetable || [];
+        const subjectsFound = [...new Set(timetableToPreview.map(t => t.subject))].filter(s => s && s.toLowerCase() !== 'break' && s.toLowerCase() !== 'lunch');
+        
+        if (subjectsFound.length === 0) {
+            verifySubjects.innerHTML = '<p class="text-[10px] text-on-surface-variant/75 text-center py-2">No subjects found in timetable.</p>';
+        } else {
+            subjectsFound.forEach(sub => {
+                const count = timetableToPreview.filter(t => t.subject === sub).length;
+                const div = document.createElement("div");
+                div.className = "flex justify-between py-1 border-b border-outline-variant/10 last:border-0";
+                div.innerHTML = `
+                    <span class="text-on-surface-variant font-medium flex items-center gap-1.5">
+                        <span class="material-symbols-outlined text-success text-[14px]">check_circle</span> ${sub}
+                    </span>
+                    <span class="text-on-surface font-bold">${count} classes / week</span>
+                `;
+                verifySubjects.appendChild(div);
+            });
+        }
+        
+        goToOnboardingStep(4);
+    } catch (err) {
+        if (loader) loader.classList.add("hidden");
+        if (scanBtn) scanBtn.disabled = false;
+        console.error("Calendar parse error:", err);
+        showToast("Connection Error", "Could not reach calendar parser.", "error");
+    }
+}
 
-    } catch (e) {
-        loader.classList.add("hidden");
-        submitBtn.disabled = false;
-        submitBtn.classList.remove("opacity-50");
-        console.error("OCR error:", e);
-        showToast("Connection Error", "Could not reach the AI OCR service. Is the backend running?", "error");
+async function saveOnboardingWizardData() {
+    if (!parsedCalendarData) {
+        showToast("Verification Required", "Academic calendar data is missing.", "warning");
+        return;
+    }
+    
+    const startVal = parsedCalendarData.semesterStart;
+    const endVal = parsedCalendarData.semesterEnd;
+    
+    if (!startVal || !endVal) {
+        showToast("Semester Dates Missing", "The AI could not determine the semester dates from the calendar.", "error");
+        return;
+    }
+    
+    const saveBtn = document.getElementById("ob-save-btn");
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.textContent = "Setting Up Semester...";
+    }
+    
+    try {
+        const startDate = new Date(startVal + "T00:00:00");
+        const endDate = new Date(endVal + "T00:00:00");
+        const startYear = startDate.getFullYear();
+        const endYear = endDate.getFullYear();
+        const academicYear = `${startYear}-${String(endYear).slice(-2)}`;
+        
+        const college = document.getElementById("ob-college").value.trim();
+        const branch = document.getElementById("ob-branch").value.trim();
+        const term = document.getElementById("ob-semester").value;
+        const targetGoal = parseInt(document.getElementById("ob-goal").value) || 75;
+        
+        // Update user profile info first
+        if (college || branch || term || targetGoal) {
+            await fetch(`${API_BASE_URL}/users/me/profile`, {
+                method: "PUT",
+                headers: {
+                    "Content-Type": "application/json",
+                    ...getAuthHeaders()
+                },
+                body: JSON.stringify({
+                    college: college || appState.profile.college,
+                    branch: branch || appState.profile.branch,
+                    term: term || appState.profile.term,
+                    target_goal: targetGoal
+                })
+            });
+        }
+        
+        // 1. Create active semester on backend
+        const semResponse = await fetch(`${API_BASE_URL}/semesters`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                ...getAuthHeaders()
+            },
+            body: JSON.stringify({
+                name: term,
+                academic_year: academicYear,
+                start_date: startVal,
+                end_date: endVal,
+                academic_calendar: JSON.stringify(parsedCalendarData)
+            })
+        });
+        
+        if (!semResponse.ok) {
+            const err = await semResponse.json();
+            showToast("Setup Failed", err.detail || "Could not set semester dates.", "error");
+            if (saveBtn) {
+                saveBtn.disabled = false;
+                saveBtn.textContent = "Start Tracking";
+            }
+            return;
+        }
+        
+        const semData = await semResponse.json();
+        appState.activeSemester = semData;
+        
+        // 2. Sync timetable schedule
+        const timetableToSave = appState.tempTimetable || [];
+        const syncResponse = await fetch(`${API_BASE_URL}/timetable/sync`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                ...getAuthHeaders()
+            },
+            body: JSON.stringify({
+                timetable: timetableToSave
+            })
+        });
+        
+        if (!syncResponse.ok) {
+            showToast("Partial Setup", "Semester saved but schedule sync failed. Check backend logs.", "warning");
+            if (saveBtn) {
+                saveBtn.disabled = false;
+                saveBtn.textContent = "Start Tracking";
+            }
+            return;
+        }
+        
+        appState.timetable = timetableToSave;
+        delete appState.tempTimetable;
+        
+        // Clear caches and state sync
+        saveStateToLocalStorage();
+        
+        closeOcrModal();
+        await initAppState();
+        renderDashboard();
+        renderTimetableClasses();
+        
+        showToast("Setup Complete ✨", "Timetable & Calendar setup synced successfully!", "check_circle");
+    } catch (err) {
+        if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.textContent = "Start Tracking";
+        }
+        console.error("Setup error:", err);
+        showToast("Setup Error", "Failed to sync onboarding details.", "error");
     }
 }
 
@@ -3414,13 +3721,30 @@ function calculateWorkingDays(startDate, endDate, holidays, timetable) {
         return "";
     }).filter(Boolean));
     
+    const workSats = new Set();
+    if (appState.activeSemester && appState.activeSemester.academic_calendar) {
+        try {
+            const cal = typeof appState.activeSemester.academic_calendar === "string" 
+                ? JSON.parse(appState.activeSemester.academic_calendar) 
+                : appState.activeSemester.academic_calendar;
+            if (cal && cal.workingSaturdays) {
+                cal.workingSaturdays.forEach(d => workSats.add(d));
+            }
+        } catch (e) {}
+    }
+    
     const daysMap = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     
     let curr = new Date(start);
     while (curr <= end) {
         const dayStr = daysMap[curr.getDay()];
         const dateStr = formatDateKey(curr);
-        if (activeDays.has(dayStr) && !holidaySet.has(dateStr)) {
+        
+        const isScheduled = activeDays.has(dayStr);
+        const isHoliday = holidaySet.has(dateStr);
+        const isWorkingSat = (dayStr === "Sat" && workSats.has(dateStr));
+        
+        if ((isScheduled && !isHoliday) || isWorkingSat) {
             count++;
         }
         curr.setDate(curr.getDate() + 1);
@@ -3443,14 +3767,27 @@ function calculateSubjectExpectedClasses(subjectName, startDate, endDate, holida
         return "";
     }).filter(Boolean));
     
+    const workSats = new Set();
+    if (appState.activeSemester && appState.activeSemester.academic_calendar) {
+        try {
+            const cal = typeof appState.activeSemester.academic_calendar === "string" 
+                ? JSON.parse(appState.activeSemester.academic_calendar) 
+                : appState.activeSemester.academic_calendar;
+            if (cal && cal.workingSaturdays) {
+                cal.workingSaturdays.forEach(d => workSats.add(d));
+            }
+        } catch (e) {}
+    }
+    
     subjectSlots.forEach(slot => {
         let curr = new Date(start);
         while (curr <= end) {
-            if (daysMap[curr.getDay()] === slot.day) {
-                const dateStr = formatDateKey(curr);
-                if (!holidaySet.has(dateStr)) {
-                    expected++;
-                }
+            const dayStr = daysMap[curr.getDay()];
+            const dateStr = formatDateKey(curr);
+            
+            const isMatch = (dayStr === slot.day && !holidaySet.has(dateStr));
+            if (isMatch) {
+                expected++;
             }
             curr.setDate(curr.getDate() + 1);
         }
@@ -3508,143 +3845,38 @@ function onOcrDatesChange() {
         lengthText += ` ≈ ${months} mo ${mDays} days`;
     }
     
-    document.getElementById("ocr-calc-duration").textContent = `${diffDays} days`;
-    document.getElementById("ocr-calc-weeks").textContent = weeksText;
-    
-    // Calculate working days
-    const workingDays = calculateWorkingDays(startDate, endDate, appState.leavePlans, appState.tempTimetable || appState.timetable);
-    document.getElementById("ocr-calc-working-days").textContent = `${workingDays} days`;
-    
-    // Expected classes per subject
-    const subjectsList = document.getElementById("ocr-calc-subjects-expected");
-    subjectsList.innerHTML = "";
-    
-    const timetableToUse = appState.tempTimetable || appState.timetable;
-    const uniqueSubjects = Array.from(new Set(timetableToUse.map(t => t.subject)));
-    
-    uniqueSubjects.forEach(subName => {
-        if (subName.toLowerCase().includes("break") || subName.toLowerCase().includes("recess")) return;
-        
-        const count = calculateSubjectExpectedClasses(subName, startDate, endDate, appState.leavePlans, timetableToUse);
-        const div = document.createElement("div");
-        div.className = "flex justify-between py-1 border-b border-outline-variant/10 last:border-0";
-        div.innerHTML = `
-            <span class="text-on-surface-variant font-medium">${subName}</span>
-            <span class="text-on-surface font-bold">${count} classes</span>
-        `;
-        subjectsList.appendChild(div);
-    });
+    document.getElementById("ocr-calc-duration").textContent = `-`;
+    document.getElementById("ocr-calc-weeks").textContent = `-`;
+    document.getElementById("ocr-calc-working-days").textContent = `-`;
 }
 
 function closeOcrModal() {
     toggleModal("ocrModal");
     setTimeout(() => {
-        document.getElementById("ocr-step-1").classList.remove("hidden");
-        document.getElementById("ocr-step-2").classList.add("hidden");
-        const modalContainer = document.getElementById("ocrModal").querySelector(".max-w-2xl, .max-w-md");
-        if (modalContainer) {
-            modalContainer.classList.replace("max-w-2xl", "max-w-md");
-        }
-        removeSelectedOcrFile();
+        goToOnboardingStep(1);
+        selectedObTtFile = null;
+        selectedObCalFile = null;
+        parsedCalendarData = null;
+        const ttInput = document.getElementById("ob-tt-input");
+        if (ttInput) ttInput.value = "";
+        const calInput = document.getElementById("ob-cal-input");
+        if (calInput) calInput.value = "";
+        
+        const ttDrop = document.getElementById("ob-tt-dropzone");
+        if (ttDrop) ttDrop.classList.remove("hidden");
+        const ttStatus = document.getElementById("ob-tt-status");
+        if (ttStatus) ttStatus.classList.add("hidden");
+        
+        const calDrop = document.getElementById("ob-cal-dropzone");
+        if (calDrop) calDrop.classList.remove("hidden");
+        const calStatus = document.getElementById("ob-cal-status");
+        if (calStatus) calStatus.classList.add("hidden");
+        
+        const ttBtn = document.getElementById("ob-tt-scan-btn");
+        if (ttBtn) ttBtn.disabled = true;
+        const calBtn = document.getElementById("ob-cal-scan-btn");
+        if (calBtn) calBtn.disabled = true;
     }, 300);
-}
-
-async function confirmOcrImport() {
-    const startVal = document.getElementById("ocr-semester-start").value;
-    const endVal = document.getElementById("ocr-semester-end").value;
-    
-    if (!startVal || !endVal) {
-        showToast("Dates Required", "Please select both semester start and end dates.", "warning");
-        return;
-    }
-    
-    const startDate = new Date(startVal + "T00:00:00");
-    const endDate = new Date(endVal + "T00:00:00");
-    
-    if (endDate < startDate) {
-        showToast("Invalid Dates", "Semester end date must be after start date.", "error");
-        return;
-    }
-    
-    const saveBtn = document.getElementById("ocr-save-btn");
-    saveBtn.disabled = true;
-    saveBtn.textContent = "Setting Up Semester...";
-    
-    try {
-        const startYear = startDate.getFullYear();
-        const endYear = endDate.getFullYear();
-        const academicYear = `${startYear}-${String(endYear).slice(-2)}`;
-        
-        // 1. Create active semester
-        const semResponse = await fetch(`${API_BASE_URL}/semesters`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                ...getAuthHeaders()
-            },
-            body: JSON.stringify({
-                name: appState.profile.term || "Semester 1",
-                academic_year: academicYear,
-                start_date: startVal,
-                end_date: endVal
-            })
-        });
-        
-        if (!semResponse.ok) {
-            const err = await semResponse.json();
-            showToast("Setup Failed", err.detail || "Could not set semester dates.", "error");
-            saveBtn.disabled = false;
-            saveBtn.textContent = "Save & Generate Calendar";
-            return;
-        }
-        
-        const semData = await semResponse.json();
-        appState.activeSemester = semData;
-        
-        // 2. Sync timetable schedule
-        const timetableToSave = appState.tempTimetable || appState.timetable;
-        const syncResponse = await fetch(`${API_BASE_URL}/timetable/sync`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                ...getAuthHeaders()
-            },
-            body: JSON.stringify({
-                timetable: timetableToSave
-            })
-        });
-        
-        if (!syncResponse.ok) {
-            showToast("Partial Setup", "Semester saved but schedule sync failed. Check backend logs.", "warning");
-            saveBtn.disabled = false;
-            saveBtn.textContent = "Save & Generate Calendar";
-            return;
-        }
-        
-        appState.timetable = timetableToSave;
-        delete appState.tempTimetable;
-        
-        // Save to cache
-        saveStateToLocalStorage();
-        
-        // Close modal wizard
-        closeOcrModal();
-        
-        // Refresh State completely
-        await initAppState();
-        
-        // Refresh UI
-        renderDashboard();
-        renderTimetableClasses();
-        
-        showToast("Setup Complete ✨", "Timetable imported & academic calendar generated successfully!", "check_circle");
-        
-    } catch (e) {
-        console.error("Confirm OCR import error:", e);
-        showToast("Connection Error", "Could not complete setup. Check your network.", "error");
-        saveBtn.disabled = false;
-        saveBtn.textContent = "Save & Generate Calendar";
-    }
 }
 
 function updateSemesterDashboard() {
@@ -3768,11 +4000,82 @@ function updateSemesterDashboard() {
         `;
         predictorBody.appendChild(tr);
     });
+
+    // 1. Semester Progress Bar updates
+    const conductedClasses = totalExpectedClasses - totalRemainingClasses;
+    const progressPercent = totalExpectedClasses > 0 ? Math.round((conductedClasses / totalExpectedClasses) * 100) : 0;
+    
+    const progressPercentEl = document.getElementById("sem-progress-percent");
+    const progressBarEl = document.getElementById("sem-progress-bar");
+    const progressConductedEl = document.getElementById("sem-progress-conducted");
+    const progressTotalEl = document.getElementById("sem-progress-total");
+    
+    if (progressPercentEl) progressPercentEl.textContent = `${progressPercent}%`;
+    if (progressBarEl) progressBarEl.style.width = `${progressPercent}%`;
+    if (progressConductedEl) progressConductedEl.textContent = `Conducted: ${conductedClasses} classes`;
+    if (progressTotalEl) progressTotalEl.textContent = `Total: ${totalExpectedClasses} classes`;
+
+    // 2. Holiday Impact Analysis
+    const impactEl = document.getElementById("sem-holiday-impact-text");
+    if (impactEl) {
+        let calData = null;
+        if (appState.activeSemester && appState.activeSemester.academic_calendar) {
+            try {
+                calData = typeof appState.activeSemester.academic_calendar === "string" 
+                    ? JSON.parse(appState.activeSemester.academic_calendar) 
+                    : appState.activeSemester.academic_calendar;
+            } catch (e) {}
+        }
+        
+        if (calData && (calData.holidays || calData.midExams || calData.semesterBreak)) {
+            const totalHols = calData.holidays ? calData.holidays.length : 0;
+            const affectedMap = {};
+            
+            // Build holiday dates set
+            const holidayDates = new Set((holidays || []).map(h => {
+                if (typeof h === "string") return h;
+                if (h.date) return h.date;
+                return "";
+            }).filter(Boolean));
+            
+            const weekdaysMap = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+            
+            let curr = new Date(startDate);
+            while (curr <= endDate) {
+                const dStr = curr.toISOString().split("T")[0];
+                if (holidayDates.has(dStr)) {
+                    const dayStr = weekdaysMap[curr.getDay()];
+                    const slots = appState.timetable.filter(s => s.day === dayStr && !s.subject.toLowerCase().includes("break"));
+                    slots.forEach(s => {
+                        affectedMap[s.subject] = (affectedMap[s.subject] || 0) + 1;
+                    });
+                }
+                curr.setDate(curr.getDate() + 1);
+            }
+            
+            let impactStr = "";
+            const affectedItems = Object.entries(affectedMap);
+            if (affectedItems.length > 0) {
+                impactStr = affectedItems.map(([sub, count]) => `${sub} (${count} class${count > 1 ? 'es' : ''})`).join(", ");
+                impactEl.innerHTML = `<span class="text-secondary font-bold">${totalHols} Holidays</span> registered. Affected classes: <span class="text-primary font-bold">${impactStr}</span>. Attendance requirements adjusted.`;
+            } else {
+                impactEl.textContent = `No scheduled classes were affected by the ${totalHols} registered holidays.`;
+            }
+        } else {
+            impactEl.textContent = "No holidays or exams scheduled this semester.";
+        }
+    }
 }
 
 // Window exposures
 window.closeOcrModal = closeOcrModal;
-window.onOcrDatesChange = onOcrDatesChange;
-window.confirmOcrImport = confirmOcrImport;
 window.updateSemesterDashboard = updateSemesterDashboard;
+window.goToOnboardingStep = goToOnboardingStep;
+window.handleObTtSelect = handleObTtSelect;
+window.handleObTtDrop = handleObTtDrop;
+window.handleObCalSelect = handleObCalSelect;
+window.handleObCalDrop = handleObCalDrop;
+window.startTimetableScanning = startTimetableScanning;
+window.startCalendarScanning = startCalendarScanning;
+window.saveOnboardingWizardData = saveOnboardingWizardData;
 

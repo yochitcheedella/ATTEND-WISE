@@ -134,6 +134,7 @@ class SemesterCreate(BaseModel):
     academic_year: str              # e.g. "2026-27"
     start_date: date
     end_date: date
+    academic_calendar: Optional[str] = None
 
 class SemesterOut(BaseModel):
     id: int
@@ -143,6 +144,7 @@ class SemesterOut(BaseModel):
     start_date: date
     end_date: date
     is_active: bool
+    academic_calendar: Optional[str] = None
     created_at: datetime
 
     class Config:

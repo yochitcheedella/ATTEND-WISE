@@ -110,6 +110,7 @@ class Semester(Base):
     start_date = Column(Date)
     end_date = Column(Date)
     is_active = Column(Boolean, default=True)
+    academic_calendar = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     owner = relationship("User", back_populates="semesters")
