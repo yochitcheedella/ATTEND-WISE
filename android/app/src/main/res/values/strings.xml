@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">AttendWise</string>
+    <string name="title_activity_main">AttendWise</string>
+    <string name="package_name">com.attendwise.app</string>
+    <string name="custom_url_scheme">com.attendwise.app</string>
+</resources>

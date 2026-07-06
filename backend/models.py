@@ -36,6 +36,7 @@ class Subject(Base):
     prof = Column(String, nullable=True)
     credits = Column(Integer, default=3)
     color = Column(String, default="#7c4dff")
+    minimum_required_attendance = Column(Float, default=75.0)
 
     owner = relationship("User", back_populates="subjects")
     timetables = relationship("Timetable", back_populates="subject")

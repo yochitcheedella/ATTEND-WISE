@@ -17,6 +17,17 @@ from .database import engine, get_db
 # Create database tables
 models.Base.metadata.create_all(bind=engine)
 
+# Simple SQLite migration for minimum_required_attendance column
+from sqlalchemy import text
+try:
+    with engine.begin() as conn:
+        result = conn.execute(text("PRAGMA table_info(subjects)"))
+        columns = [row[1] for row in result.fetchall()]
+        if "minimum_required_attendance" not in columns:
+            conn.execute(text("ALTER TABLE subjects ADD COLUMN minimum_required_attendance FLOAT DEFAULT 75.0"))
+except Exception as e:
+    print("Migration warning:", e)
+
 app = FastAPI(
     title="AttendWise API",
     description="Backend API for AttendWise AI-Powered Student Attendance Companion",
@@ -174,6 +185,7 @@ def update_subject(subject_id: int, subject_update: schemas.SubjectCreate, curre
     db_sub.prof = subject_update.prof
     db_sub.credits = subject_update.credits
     db_sub.color = subject_update.color
+    db_sub.minimum_required_attendance = subject_update.minimum_required_attendance
     
     db.commit()
     db.refresh(db_sub)
@@ -794,7 +806,7 @@ def get_state(current_user: models.User = Depends(auth.get_current_user), db: Se
             "total": stats["total"]
         },
         "bunkAnalysis": bunk_info,
-        "subjects": [{"id": s.id, "name": s.name, "code": s.code, "prof": s.prof, "color": s.color, "credits": s.credits} for s in subjects],
+        "subjects": [{"id": s.id, "name": s.name, "code": s.code, "prof": s.prof, "color": s.color, "credits": s.credits, "minimum_required_attendance": s.minimum_required_attendance} for s in subjects],
         "timetable": tt_formatted,
         "attendanceLogs": logs
     }

@@ -45,6 +45,7 @@ class SubjectBase(BaseModel):
     prof: Optional[str] = None
     credits: int = 3
     color: str = "#7c4dff"
+    minimum_required_attendance: float = 75.0
 
 class SubjectCreate(SubjectBase):
     pass

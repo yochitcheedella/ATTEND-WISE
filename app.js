@@ -518,7 +518,16 @@ function calculateSubjectAttendance() {
     
     // Initialize subjects list
     appState.subjects.forEach(sub => {
-        subjectStats[sub.name] = { present: 0, absent: 0, total: 0, percent: 0, code: sub.code, color: sub.color };
+        subjectStats[sub.name] = { 
+            present: 0, 
+            absent: 0, 
+            total: 0, 
+            percent: 0, 
+            code: sub.code || "", 
+            color: sub.color || "#7c4dff",
+            prof: sub.prof || "No Faculty",
+            min_req: sub.minimum_required_attendance || 75
+        };
     });
     
     // Add logs
@@ -545,36 +554,81 @@ function calculateSubjectAttendance() {
     return subjectStats;
 }
 
-// Calculate Safe Bunk or Classes Needed logic
 function runBunkAnalyzer() {
-    const global = calculateGlobalAttendance();
-    const target = appState.profile.targetGoal;
+    const subjectStats = calculateSubjectAttendance();
+    const names = Object.keys(subjectStats);
     
-    if (global.total === 0) {
-        return { type: "neutral", text: "No logs logged", desc: "Start marking attendance to view limits." };
+    if (names.length === 0) {
+        return { type: "neutral", text: "No logs logged", desc: "Start marking attendance to view limits.", count: 0 };
     }
     
-    // Safe Bunks Formula: floor((Present - (Target/100) * Conducted) / (Target/100))
-    // How many classes can we miss and still maintain >= Target percentage?
-    const targetFraction = target / 100;
-    const safeBunks = Math.floor((global.present - targetFraction * global.total) / targetFraction);
+    let highestRiskSub = null;
+    let lowestPercent = 101;
+    let safeBunksTotal = 1000;
+    let hasCritical = false;
+    let hasWarning = false;
     
-    if (safeBunks >= 0) {
-        return {
-            type: "safe",
-            count: safeBunks,
-            text: `${safeBunks} Classes`,
-            desc: `You can safely miss ${safeBunks} consecutive classes while keeping above your ${target}% target.`
-        };
-    } else {
-        // Classes Needed Formula: ceil((Target/100 * Conducted - Present) / (1 - Target/100))
-        // How many consecutive classes must we attend to recover to Target?
-        const classesNeeded = Math.ceil((targetFraction * global.total - global.present) / (1 - targetFraction));
+    names.forEach(name => {
+        const stats = subjectStats[name];
+        if (stats.total === 0) return;
+        
+        const targetFraction = stats.min_req / 100;
+        
+        if (stats.percent < stats.min_req) {
+            hasCritical = true;
+            const classesNeeded = Math.ceil((targetFraction * stats.total - stats.present) / (1 - targetFraction));
+            if (stats.percent < lowestPercent) {
+                lowestPercent = stats.percent;
+                highestRiskSub = {
+                    name,
+                    percent: stats.percent,
+                    type: "risk",
+                    count: classesNeeded,
+                    desc: `Critical! "${name}" is at ${stats.percent}%. You must attend the next ${classesNeeded} consecutive classes to reach 75%.`
+                };
+            }
+        } else {
+            const safeBunks = Math.floor((stats.present - targetFraction * stats.total) / targetFraction);
+            if (safeBunks < safeBunksTotal) {
+                safeBunksTotal = safeBunks;
+            }
+            if (stats.percent < 80) {
+                hasWarning = true;
+                if (!hasCritical && stats.percent < lowestPercent) {
+                    lowestPercent = stats.percent;
+                    highestRiskSub = {
+                        name,
+                        percent: stats.percent,
+                        type: "warning",
+                        count: safeBunks,
+                        desc: `Warning! "${name}" is at ${stats.percent}% (Close to falling below 75%). You can bunk at most ${safeBunks} classes.`
+                    };
+                }
+            }
+        }
+    });
+    
+    if (highestRiskSub && highestRiskSub.type === "risk") {
         return {
             type: "risk",
-            count: classesNeeded,
-            text: `${classesNeeded} Classes Required`,
-            desc: `Warning! You are below your goal. You must attend the next ${classesNeeded} consecutive classes to reach ${target}%.`
+            count: highestRiskSub.count,
+            text: `Risk: ${highestRiskSub.name}`,
+            desc: highestRiskSub.desc
+        };
+    } else if (highestRiskSub && highestRiskSub.type === "warning") {
+        return {
+            type: "warning",
+            count: highestRiskSub.count,
+            text: `Warning: ${highestRiskSub.name}`,
+            desc: highestRiskSub.desc
+        };
+    } else {
+        const count = safeBunksTotal === 1000 ? 0 : safeBunksTotal;
+        return {
+            type: "safe",
+            count: count,
+            text: `${count} Safe Bunk${count !== 1 ? 's' : ''}`,
+            desc: `All subjects are safe (above 80%). You can safely miss at least ${count} consecutive classes overall.`
         };
     }
 }
@@ -645,6 +699,7 @@ function getNextScheduledClass() {
 // --- A. DASHBOARD ---
 function renderDashboard() {
     const global = calculateGlobalAttendance();
+    const subjectStats = calculateSubjectAttendance();
     
     // Compute local streak as fallback if backend returned 0
     const displayStreak = appState.profile.streak > 0
@@ -724,6 +779,32 @@ function renderDashboard() {
     const circle = document.getElementById("dashboard-progress-circle");
     const pctEl = document.getElementById("dash-overall-percent");
     
+    // Determine overall ring color based on subject-wise risk
+    let anyCritical = false;
+    let anyWarning = false;
+    Object.values(subjectStats).forEach(s => {
+        if (s.total > 0) {
+            if (s.percent < s.min_req) anyCritical = true;
+            else if (s.percent < 80) anyWarning = true;
+        }
+    });
+    
+    let ringColor = "#cdbdff";
+    let shadowColor = "rgba(205,189,255,0.5)";
+    if (anyCritical) {
+        ringColor = "#ff5252"; // red
+        shadowColor = "rgba(255,82,82,0.5)";
+    } else if (anyWarning) {
+        ringColor = "#ffb300"; // amber
+        shadowColor = "rgba(255,179,0,0.5)";
+    } else {
+        ringColor = "#40e56c"; // green
+        shadowColor = "rgba(64,229,108,0.5)";
+    }
+    
+    circle.setAttribute("stroke", ringColor);
+    circle.style.filter = `drop-shadow(0 0 8px ${shadowColor})`;
+    
     const radius = circle.r.baseVal.value;
     const circumference = radius * 2 * Math.PI;
     circle.style.strokeDasharray = `${circumference} ${circumference}`;
@@ -766,6 +847,9 @@ function renderDashboard() {
     if (analysis.type === "safe") {
         bunkBar.className = "h-full bg-secondary w-full rounded-full transition-all duration-1000 ease-out shadow-[0_0_8px_rgba(64,229,108,0.4)]";
         bunkTitle.className = "font-headline-lg-mobile text-[22px] text-secondary font-extrabold";
+    } else if (analysis.type === "warning") {
+        bunkBar.className = "h-full bg-amber-500 w-[60%] rounded-full transition-all duration-1000 ease-out shadow-[0_0_8px_rgba(245,158,11,0.4)]";
+        bunkTitle.className = "font-headline-lg-mobile text-[22px] text-amber-500 font-extrabold";
     } else if (analysis.type === "risk") {
         bunkBar.className = "h-full bg-error w-[30%] rounded-full transition-all duration-1000 ease-out shadow-[0_0_8px_rgba(255,82,82,0.4)]";
         bunkTitle.className = "font-headline-lg-mobile text-[22px] text-error font-extrabold";
@@ -836,23 +920,56 @@ function renderDashboardSubjectSummary() {
         box.innerHTML = `<p class="text-[11px] text-on-surface-variant/50 text-center py-4">No subjects found.</p>`;
         return;
     }
+    
+    // We adjust the max height in index.html, but let's make it look nice
     names.forEach(name => {
         const stats = subjectStats[name];
-        let bar = "bg-primary", pctClass = "text-on-surface-variant";
-        if (stats.percent < appState.profile.targetGoal && stats.total > 0) {
-            bar = "bg-error"; pctClass = "text-error font-bold";
-        } else if (stats.percent >= 85) {
-            bar = "bg-secondary";
+        const minReq = stats.min_req || 75;
+        
+        let status = "Safe";
+        let badgeColor = "bg-secondary/15 text-secondary border border-secondary/20 shadow-[0_0_8px_rgba(64,229,108,0.2)]";
+        let barColor = "bg-secondary";
+        
+        if (stats.percent < minReq) {
+            status = "Critical";
+            badgeColor = "bg-error/15 text-error border border-error/20 shadow-[0_0_8px_rgba(255,82,82,0.2)]";
+            barColor = "bg-error";
+        } else if (stats.percent < 80) {
+            status = "Warning";
+            badgeColor = "bg-amber-500/15 text-amber-500 border border-amber-500/20 shadow-[0_0_8px_rgba(245,158,11,0.2)]";
+            barColor = "bg-amber-500";
         }
+        
+        // Calculate safe bunks or required classes
+        const targetFraction = minReq / 100;
+        let actionText = "";
+        if (stats.percent >= minReq) {
+            const safeBunks = Math.floor((stats.present - targetFraction * stats.total) / targetFraction);
+            actionText = safeBunks > 0 ? `Can miss ${safeBunks} class${safeBunks !== 1 ? 'es' : ''}` : `Cannot miss classes`;
+        } else {
+            const classesNeeded = Math.ceil((targetFraction * stats.total - stats.present) / (1 - targetFraction));
+            actionText = `Must attend next ${classesNeeded} class${classesNeeded !== 1 ? 'es' : ''}`;
+        }
+        
         const row = document.createElement("div");
-        row.className = "space-y-1";
+        row.className = "bg-surface-container-low p-3 rounded-xl border border-outline-variant/30 space-y-1.5";
         row.innerHTML = `
-            <div class="flex justify-between items-center">
-                <span class="font-semibold text-[11px] text-on-surface truncate max-w-[150px]" title="${name}">${name}</span>
-                <span class="text-[11px] ${pctClass}">${stats.percent}%</span>
+            <div class="flex justify-between items-start">
+                <div class="min-w-0 flex-1">
+                    <h4 class="font-extrabold text-[12px] text-on-surface leading-tight truncate mr-2" title="${name}">${name}</h4>
+                    <p class="text-[10px] text-on-surface-variant font-medium mt-0.5">${stats.prof || 'No Faculty'}</p>
+                </div>
+                <div class="text-right flex-shrink-0">
+                    <span class="px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wider ${badgeColor}">${status}</span>
+                    <p class="text-[10px] text-on-surface font-extrabold mt-1">${stats.percent}%</p>
+                </div>
             </div>
-            <div class="h-1 w-full bg-surface-container rounded-full overflow-hidden">
-                <div class="h-full ${bar} rounded-full transition-all duration-700" style="width:${stats.percent}%"></div>
+            <div class="flex justify-between items-center text-[10px] text-on-surface-variant font-semibold pt-1 border-t border-outline-variant/10">
+                <span>Attended: <b class="text-on-surface font-extrabold">${stats.present}/${stats.total}</b></span>
+                <span class="font-extrabold text-on-surface">${actionText}</span>
+            </div>
+            <div class="h-1.5 w-full bg-surface-container rounded-full overflow-hidden">
+                <div class="h-full ${barColor} rounded-full transition-all duration-700" style="width:${stats.percent}%"></div>
             </div>
         `;
         box.appendChild(row);
@@ -898,25 +1015,96 @@ function renderDashboardRecentLogs() {
 function renderDashboardAiInsights(global, analysis, displayStreak) {
     const box = document.getElementById("dash-ai-insight-box");
     if (!box) return;
+    
     const subjectStats = calculateSubjectAttendance();
-    let lowestSubject = null, lowestPct = 100;
-    Object.values(subjectStats).forEach(s => {
-        if (s.total > 0 && s.percent < lowestPct) { lowestPct = s.percent; lowestSubject = s; }
+    const names = Object.keys(subjectStats);
+    
+    let criticalList = [];
+    let safeList = [];
+    let highestRiskSub = null;
+    let lowestPct = 101;
+    
+    names.forEach(name => {
+        const stats = subjectStats[name];
+        if (stats.total === 0) return;
+        
+        const minReq = stats.min_req || 75;
+        const targetFraction = minReq / 100;
+        
+        if (stats.percent < minReq) {
+            const classesNeeded = Math.ceil((targetFraction * stats.total - stats.present) / (1 - targetFraction));
+            criticalList.push({ name, percent: stats.percent, needed: classesNeeded, minReq });
+            if (stats.percent < lowestPct) {
+                lowestPct = stats.percent;
+                highestRiskSub = name;
+            }
+        } else {
+            const safeBunks = Math.floor((stats.present - targetFraction * stats.total) / targetFraction);
+            if (safeBunks > 0) {
+                safeList.push({ name, percent: stats.percent, bunks: safeBunks, minReq });
+            }
+        }
     });
-    let aiHtml = "", theme = "bg-primary/8 border-primary/20";
-    if (lowestSubject && lowestPct < appState.profile.targetGoal) {
-        aiHtml = `<span class="material-symbols-outlined text-error text-[14px] mr-1 align-middle">warning</span><strong class="text-error">Warning:</strong> ${lowestSubject.name || lowestSubject.code} is at <strong class="text-error">${lowestPct}%</strong> — below your ${appState.profile.targetGoal}% goal. Attend the next class!`;
-        theme = "bg-error/8 border-error/20";
-    } else if (analysis.type === "safe" && analysis.count >= 3) {
-        aiHtml = `<span class="material-symbols-outlined text-secondary text-[14px] mr-1 align-middle">check_circle</span>Great shape! You have <strong class="text-secondary">${analysis.count} safe bunks</strong> remaining at your current pace.`;
-        theme = "bg-secondary/8 border-secondary/20";
-    } else if (global.percentage >= appState.profile.targetGoal) {
-        aiHtml = `<span class="material-symbols-outlined text-primary text-[14px] mr-1 align-middle">local_fire_department</span>Your <strong class="text-primary">${displayStreak}-day streak</strong> is keeping you on track. Stay consistent to maintain your ${appState.profile.targetGoal}% target.`;
-    } else {
-        aiHtml = `<span class="material-symbols-outlined text-error text-[14px] mr-1 align-middle">trending_down</span>Your attendance is at <strong class="text-error">${global.percentage}%</strong>. Attend the next <strong class="text-on-surface">${analysis.count || 1}</strong> classes to recover.`;
-        theme = "bg-error/8 border-error/20";
+    
+    let suggestions = [];
+    
+    // 1. Highest risk suggestion
+    if (highestRiskSub) {
+        suggestions.push({
+            type: "error",
+            text: `<strong>${highestRiskSub}</strong> is currently your highest-risk subject at <strong class="text-error">${lowestPct}%</strong>.`,
+            icon: "warning"
+        });
     }
-    box.innerHTML = `<div class="border rounded-xl p-3 text-[12px] leading-relaxed text-on-surface-variant ${theme}">${aiHtml}</div>`;
+    
+    // 2. Critical subjects steps to reach target
+    criticalList.forEach(item => {
+        suggestions.push({
+            type: "error",
+            text: `Attend your next <strong class="text-error">${item.needed}</strong> consecutive ${item.name} classes to reach ${item.minReq}%.`,
+            icon: "priority_high"
+        });
+    });
+    
+    // 3. Safe subjects skips remaining
+    safeList.forEach(item => {
+        suggestions.push({
+            type: "secondary",
+            text: `You can safely miss <strong class="text-secondary">${item.bunks}</strong> ${item.name} class${item.bunks !== 1 ? 'es' : ''} and still remain above ${item.minReq}%.`,
+            icon: "check_circle"
+        });
+    });
+    
+    // Fallback if list is empty
+    if (suggestions.length === 0) {
+        suggestions.push({
+            type: "primary",
+            text: `Start marking attendance to generate smart AI scheduling recommendations.`,
+            icon: "insights"
+        });
+    }
+    
+    // Render top 3 suggestions
+    let html = `<div class="space-y-2">`;
+    suggestions.slice(0, 3).forEach(s => {
+        let theme = "bg-primary/8 border-primary/20 text-on-surface-variant";
+        let iconColor = "text-primary";
+        if (s.type === "error") {
+            theme = "bg-error/8 border-error/20 text-on-surface-variant";
+            iconColor = "text-error";
+        } else if (s.type === "secondary") {
+            theme = "bg-secondary/8 border-secondary/20 text-on-surface-variant";
+            iconColor = "text-secondary";
+        }
+        html += `
+            <div class="border rounded-xl p-2.5 text-[11px] leading-normal flex items-start gap-2 ${theme}">
+                <span class="material-symbols-outlined text-[15px] ${iconColor} mt-0.5">${s.icon}</span>
+                <div class="flex-1">${s.text}</div>
+            </div>
+        `;
+    });
+    html += `</div>`;
+    box.innerHTML = html;
 }
 
 function formatTimeAmPm(timeStr) {
@@ -1280,20 +1468,34 @@ async function renderAnalytics() {
 
     const subjectStats = detailedData ? detailedData.subjects : calculateSubjectAttendance();
     
+    // Populate subject select for AI Predictor (Checklist Section 1.5)
+    const predSelect = document.getElementById("predict-subject-select");
+    if (predSelect) {
+        predSelect.innerHTML = `<option value="all">Overall Semester</option>`;
+        appState.subjects.forEach(sub => {
+            const opt = document.createElement("option");
+            opt.value = sub.name;
+            opt.textContent = sub.name;
+            predSelect.appendChild(opt);
+        });
+    }
+
     // Subject progress bars rendering
     const subjectsBox = document.getElementById("analytics-subjects-list");
     subjectsBox.innerHTML = "";
     
     Object.keys(subjectStats).forEach(name => {
         const stats = subjectStats[name];
+        const minReq = stats.min_req || 75;
         
         const row = document.createElement("div");
         let accentBorder = "border-l-primary";
         let fillProgressColor = "bg-primary";
         let warningBadge = "";
         
-        // Highlight logic for low attendance (< 75%)
-        if (stats.percent < appState.profile.targetGoal && stats.total > 0) {
+        const status = stats.percent >= 80 ? 'Safe' : stats.percent >= minReq ? 'Warning' : 'Critical';
+        
+        if (status === 'Critical') {
             accentBorder = "border-l-error";
             fillProgressColor = "bg-error";
             warningBadge = `
@@ -1301,9 +1503,22 @@ async function renderAnalytics() {
                     <span class="material-symbols-outlined text-[12px]">priority_high</span> Critical
                 </div>
             `;
-        } else if (stats.percent >= 85) {
+        } else if (status === 'Warning') {
+            accentBorder = "border-l-amber-500";
+            fillProgressColor = "bg-amber-500";
+            warningBadge = `
+                <div class="flex items-center gap-0.5 text-amber-500 text-[10px] font-bold uppercase">
+                    <span class="material-symbols-outlined text-[12px]">warning</span> Warning
+                </div>
+            `;
+        } else {
             accentBorder = "border-l-secondary";
             fillProgressColor = "bg-secondary";
+            warningBadge = `
+                <div class="flex items-center gap-0.5 text-secondary text-[10px] font-bold uppercase">
+                    <span class="material-symbols-outlined text-[12px]">check_circle</span> Safe
+                </div>
+            `;
         }
         
         row.className = `glass-card p-3 rounded-2xl flex items-center gap-3 border-l-4 ${accentBorder} transition-all duration-300`;
@@ -1318,7 +1533,7 @@ async function renderAnalytics() {
                 </div>
                 <div class="flex justify-between items-center text-[10px] text-on-surface-variant font-label-sm">
                     <span>${stats.present} present / ${stats.absent} absent</span>
-                    <span>${stats.code}</span>
+                    <span>Target: ${minReq}%</span>
                 </div>
             </div>
             ${warningBadge}
@@ -1454,54 +1669,88 @@ function renderWeeklyTrendChart(weekValues) {
 
 // AI Attendance Prediction Forecast Handler
 async function updatePredictionForecast() {
+    const subSelect = document.getElementById("predict-subject-select");
+    const subVal = subSelect ? subSelect.value : "all";
+    
     const attendVal = parseInt(document.getElementById("predict-attend-input").value) || 0;
     const missVal = parseInt(document.getElementById("predict-miss-input").value) || 0;
     
     const percentEl = document.getElementById("prediction-result-percent");
     const statusEl = document.getElementById("prediction-result-status");
     
-    try {
-        const response = await fetch(`${API_BASE_URL}/analytics/prediction?missed=${missVal}&attended=${attendVal}`, {
-            headers: getAuthHeaders()
-        });
-        if (response.ok) {
-            const data = await response.json();
-            percentEl.textContent = `${data.predicted_percent.toFixed(1)}%`;
-            
-            if (attendVal === 0 && missVal === 0) {
-                statusEl.textContent = "No Input";
-                statusEl.className = "px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-surface-container-highest text-on-surface-variant";
-            } else if (data.will_reach_target) {
-                statusEl.textContent = "Target Met";
-                statusEl.className = "px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-secondary/15 text-secondary border border-secondary/20 shadow-[0_0_8px_rgba(64,229,108,0.2)]";
-            } else {
-                statusEl.textContent = "Below Target";
-                statusEl.className = "px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-error/15 text-error border border-error/20 shadow-[0_0_8px_rgba(255,82,82,0.2)]";
+    if (subVal === "all") {
+        try {
+            const response = await fetch(`${API_BASE_URL}/analytics/prediction?missed=${missVal}&attended=${attendVal}`, {
+                headers: getAuthHeaders()
+            });
+            if (response.ok) {
+                const data = await response.json();
+                percentEl.textContent = `${data.predicted_percent.toFixed(1)}%`;
+                
+                if (attendVal === 0 && missVal === 0) {
+                    statusEl.textContent = "No Input";
+                    statusEl.className = "px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-surface-container-highest text-on-surface-variant";
+                } else if (data.will_reach_target) {
+                    statusEl.textContent = "Target Met";
+                    statusEl.className = "px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-secondary/15 text-secondary border border-secondary/20 shadow-[0_0_8px_rgba(64,229,108,0.2)]";
+                } else {
+                    statusEl.textContent = "Below Target";
+                    statusEl.className = "px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-error/15 text-error border border-error/20 shadow-[0_0_8px_rgba(255,82,82,0.2)]";
+                }
+                return;
             }
+        } catch (e) {
+            console.error("Failed to query prediction API, running local simulation fallback", e);
+        }
+        
+        // Local Simulation Fallback
+        const global = calculateGlobalAttendance();
+        const target = appState.profile.targetGoal;
+        
+        const newPresent = global.present + attendVal;
+        const newTotal = global.total + attendVal + missVal;
+        const newPercent = newTotal > 0 ? (newPresent / newTotal * 100) : 0;
+        
+        percentEl.textContent = `${newPercent.toFixed(1)}%`;
+        if (attendVal === 0 && missVal === 0) {
+            statusEl.textContent = "No Input";
+            statusEl.className = "px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-surface-container-highest text-on-surface-variant";
+        } else if (newPercent >= target) {
+            statusEl.textContent = "Target Met";
+            statusEl.className = "px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-secondary/15 text-secondary border border-secondary/20 shadow-[0_0_8px_rgba(64,229,108,0.2)]";
+        } else {
+            statusEl.textContent = "Below Target";
+            statusEl.className = "px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-error/15 text-error border border-error/20 shadow-[0_0_8px_rgba(255,82,82,0.2)]";
+        }
+    } else {
+        // Subject-specific prediction (local calculation based on Subject stats)
+        const subjectStats = calculateSubjectAttendance();
+        const stats = subjectStats[subVal];
+        
+        if (!stats) {
+            percentEl.textContent = "--%";
+            statusEl.textContent = "No Data";
+            statusEl.className = "px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-surface-container-highest text-on-surface-variant";
             return;
         }
-    } catch (e) {
-        console.error("Failed to query prediction API, running local simulation fallback", e);
-    }
-    
-    // Local Simulation Fallback
-    const global = calculateGlobalAttendance();
-    const target = appState.profile.targetGoal;
-    
-    const newPresent = global.present + attendVal;
-    const newTotal = global.total + attendVal + missVal;
-    const newPercent = newTotal > 0 ? (newPresent / newTotal * 100) : 0;
-    
-    percentEl.textContent = `${newPercent.toFixed(1)}%`;
-    if (attendVal === 0 && missVal === 0) {
-        statusEl.textContent = "No Input";
-        statusEl.className = "px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-surface-container-highest text-on-surface-variant";
-    } else if (newPercent >= target) {
-        statusEl.textContent = "Target Met";
-        statusEl.className = "px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-secondary/15 text-secondary border border-secondary/20 shadow-[0_0_8px_rgba(64,229,108,0.2)]";
-    } else {
-        statusEl.textContent = "Below Target";
-        statusEl.className = "px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-error/15 text-error border border-error/20 shadow-[0_0_8px_rgba(255,82,82,0.2)]";
+        
+        const newPresent = stats.present + attendVal;
+        const newTotal = stats.total + attendVal + missVal;
+        const newPercent = newTotal > 0 ? (newPresent / newTotal * 100) : 0;
+        
+        const targetGoal = stats.min_req || 75;
+        
+        percentEl.textContent = `${newPercent.toFixed(1)}%`;
+        if (attendVal === 0 && missVal === 0) {
+            statusEl.textContent = "No Input";
+            statusEl.className = "px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-surface-container-highest text-on-surface-variant";
+        } else if (newPercent >= targetGoal) {
+            statusEl.textContent = "Target Met";
+            statusEl.className = "px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-secondary/15 text-secondary border border-secondary/20 shadow-[0_0_8px_rgba(64,229,108,0.2)]";
+        } else {
+            statusEl.textContent = "Below Target";
+            statusEl.className = "px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-error/15 text-error border border-error/20 shadow-[0_0_8px_rgba(255,82,82,0.2)]";
+        }
     }
 }
 
@@ -2416,14 +2665,41 @@ function generateSmartNotifications() {
         }
     }
     
-    // 2. Low attendance warning
+    // 2. Subject-wise notifications (Checklist Section 1.5)
     const subjectStats = calculateSubjectAttendance();
     Object.keys(subjectStats).forEach(name => {
         const stats = subjectStats[name];
-        if (stats.total > 0 && stats.percent < appState.profile.targetGoal) {
+        if (stats.total === 0) return;
+        
+        const minReq = stats.min_req || 75;
+        
+        if (stats.percent < minReq) {
             addNotification(
-                "Low Attendance Warning",
-                `Your attendance in "${name}" is at ${stats.percent}%, which is below your target of ${appState.profile.targetGoal}%.`,
+                "Critical Attendance",
+                `Your attendance in "${name}" is at ${stats.percent}%, which is below the mandatory ${minReq}% limit.`,
+                "warning"
+            );
+        } else if (stats.percent === minReq) {
+            addNotification(
+                "Borderline Attendance",
+                `Borderline: Your attendance in "${name}" is exactly ${minReq}%. One bunk could drop it!`,
+                "warning"
+            );
+        } else if (stats.percent > minReq && stats.percent <= minReq + 3) {
+            addNotification(
+                "Safe Attendance Reached",
+                `Well done! Your attendance in "${name}" is back above the ${minReq}% threshold (currently ${stats.percent}%).`,
+                "success"
+            );
+        }
+        
+        // One class away from falling below target
+        const nextTotal = stats.total + 1;
+        const nextPercent = Math.round((stats.present / nextTotal) * 100);
+        if (stats.percent >= minReq && nextPercent < minReq) {
+            addNotification(
+                "At Risk of Shortage",
+                `Warning: Missing one more class in "${name}" will drop you below ${minReq}% (predicted: ${nextPercent}%).`,
                 "warning"
             );
         }
@@ -2439,17 +2715,13 @@ function generateSmartNotifications() {
         addNotification("Week-Long Streak!", `Awesome! You have kept a ${streak} days attendance streak active.`, "success");
     }
     
-    // 4. Overall Attendance Target Goal Status
-    const global = calculateGlobalAttendance();
-    if (global.total > 0) {
-        if (global.percentage >= appState.profile.targetGoal) {
-            addNotification("Goal Achieved", `Congratulations! Your overall attendance is at ${global.percentage}%, exceeding your ${appState.profile.targetGoal}% target.`, "success");
-        } else {
-            const analysis = runBunkAnalyzer();
-            if (analysis.type === "risk") {
-                addNotification("Action Required", `You need to attend the next ${analysis.count} consecutive classes to reach your target goal.`, "warning");
-            }
-        }
+    // 4. End-of-week attendance summary (Friday/Saturday/Sunday)
+    if (dayName === "Fri" || dayName === "Sat" || dayName === "Sun") {
+        addNotification(
+            "Weekly Attendance Summary",
+            `It's the end of the week! Review your subject-wise standings in the Analytics tab to ensure all subjects remain above 75%.`,
+            "info"
+        );
     }
 }
 
