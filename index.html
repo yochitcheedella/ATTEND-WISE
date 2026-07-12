@@ -135,11 +135,34 @@
         }
 
         .glass-card {
-            background: rgba(32, 31, 31, 0.55);
+            background: linear-gradient(135deg, rgba(30,30,40,0.6) 0%, rgba(20,20,30,0.7) 100%);
             backdrop-filter: blur(16px);
             -webkit-backdrop-filter: blur(16px);
-            border: 1px solid rgba(73, 68, 85, 0.3);
         }
+
+        /* Login Screen Animations */
+        @keyframes float {
+            0% { transform: translateY(0px); }
+            50% { transform: translateY(-10px); }
+            100% { transform: translateY(0px); }
+        }
+        
+        @keyframes fade-in-up {
+            0% { opacity: 0; transform: translateY(20px); }
+            100% { opacity: 1; transform: translateY(0); }
+        }
+        
+        @keyframes pulse-glow {
+            0%, 100% { opacity: 0.2; transform: scale(1); }
+            50% { opacity: 0.3; transform: scale(1.05); }
+        }
+
+        .animate-float { animation: float 6s ease-in-out infinite; }
+        .animate-fade-in-up { animation: fade-in-up 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+        .animate-pulse-glow { animation: pulse-glow 8s ease-in-out infinite; }
+        .delay-100 { animation-delay: 100ms; }
+        .delay-200 { animation-delay: 200ms; }
+        .delay-300 { animation-delay: 300ms; }
 
         .no-scrollbar::-webkit-scrollbar {
             display: none;
@@ -298,109 +321,106 @@
     </div>
 
     <!-- AUTH SCREEN OVERLAY -->
-    <div id="auth-screen" class="fixed inset-0 z-[200] flex items-center justify-center bg-background/95 backdrop-blur-sm">
+    <div id="auth-screen" class="fixed inset-0 z-[200] flex items-center justify-center bg-background/95 backdrop-blur-md">
         <!-- Background glow effects -->
-        <div class="absolute inset-0 pointer-events-none overflow-hidden">
-            <div class="absolute top-[-15%] right-[20%] w-[35rem] h-[35rem] bg-primary-container/25 blur-[140px] rounded-full"></div>
-            <div class="absolute bottom-[-10%] left-[10%] w-[30rem] h-[30rem] bg-secondary-container/20 blur-[140px] rounded-full"></div>
+        <div class="absolute inset-0 pointer-events-none overflow-hidden opacity-50">
+            <div class="absolute top-[-15%] right-[20%] w-[35rem] h-[35rem] bg-primary-container/30 blur-[140px] rounded-full animate-pulse-glow"></div>
+            <div class="absolute bottom-[-10%] left-[10%] w-[30rem] h-[30rem] bg-secondary-container/20 blur-[140px] rounded-full animate-pulse-glow delay-200"></div>
         </div>
 
-        <div class="relative w-full max-w-sm mx-4">
+        <div class="relative w-full max-w-sm mx-4 animate-fade-in-up">
             <!-- Logo / Title -->
-            <div class="text-center mb-8">
-                <div class="w-16 h-16 rounded-3xl bg-primary/10 border border-primary/20 flex items-center justify-center mx-auto mb-4">
-                    <span class="material-symbols-outlined text-primary text-[36px]">school</span>
+            <div class="text-center mb-8 flex flex-col items-center">
+                <div class="w-24 h-24 rounded-3xl bg-surface/50 border border-outline-variant/30 flex items-center justify-center mb-5 animate-float shadow-[0_8px_32px_rgba(124,77,255,0.2)] p-2 backdrop-blur-sm">
+                    <img src="logo-3d.png" alt="AttendWise Logo" class="w-full h-full object-contain drop-shadow-xl" />
                 </div>
-                <h1 class="font-bold text-[28px] text-primary leading-none">AttendWise</h1>
-                <p class="text-[13px] text-on-surface-variant mt-1.5">AI-Powered Student Attendance Companion</p>
+                <h1 class="font-display-lg text-[36px] font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-primary to-secondary leading-none tracking-tight">AttendWise</h1>
+                <p class="text-[12px] text-on-surface-variant uppercase tracking-widest font-semibold mt-2">AI Student Attendance Companion</p>
             </div>
 
             <!-- Glass card -->
-            <div class="glass-card rounded-3xl p-6 border border-outline-variant/40">
+            <div class="glass-card rounded-3xl p-6 border border-outline-variant/40 shadow-2xl relative overflow-hidden">
+                <div class="absolute inset-0 bg-gradient-to-br from-white/[0.05] to-transparent pointer-events-none"></div>
                 <!-- Tab switcher -->
-                <div class="flex p-1 bg-surface-container rounded-2xl border border-outline-variant mb-5">
+                <div class="flex p-1 bg-surface-container/80 backdrop-blur-sm rounded-2xl border border-outline-variant/60 mb-6 relative z-10">
                     <button id="auth-tab-signin" onclick="switchAuthTab('signin')" class="flex-1 py-2 text-center text-[13px] rounded-xl font-bold transition-all bg-surface-container-high text-on-surface shadow-sm">Sign In</button>
                     <button id="auth-tab-signup" onclick="switchAuthTab('signup')" class="flex-1 py-2 text-center text-[13px] rounded-xl font-bold transition-all text-on-surface-variant hover:text-on-surface">Register</button>
                 </div>
 
                 <!-- Sign In Form -->
-                <form id="signin-form" onsubmit="handleAuthSignIn(event)" class="space-y-4">
-                    <div>
-                        <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Email Address</label>
-                        <input type="email" id="signin-email" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface px-3 py-2.5 focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none" placeholder="you@example.com" required />
+                <form id="signin-form" onsubmit="handleAuthSignIn(event)" class="space-y-4 relative z-10">
+                    <div class="space-y-3">
+                        <div>
+                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5 ml-1">Email Address</label>
+                            <input type="email" id="signin-email" class="w-full bg-zinc-900/80 border border-outline-variant/60 rounded-xl text-[13px] text-on-surface px-4 py-3 focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none transition-all focus:bg-zinc-900" placeholder="you@example.com" required />
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5 ml-1">Password</label>
+                            <input type="password" id="signin-password" class="w-full bg-zinc-900/80 border border-outline-variant/60 rounded-xl text-[13px] text-on-surface px-4 py-3 focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none transition-all focus:bg-zinc-900" placeholder="••••••••" required />
+                        </div>
                     </div>
-                    <div>
-                        <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Password</label>
-                        <input type="password" id="signin-password" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface px-3 py-2.5 focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none" placeholder="••••••••" required />
-                    </div>
-                    <button type="submit" class="w-full py-3 bg-primary text-on-primary rounded-xl font-bold text-[14px] active:scale-95 transition-all hover:bg-primary/90 mt-2">
-                        Sign In
+                    <button type="submit" class="w-full py-3.5 bg-gradient-to-r from-primary to-[#9876ff] text-on-primary rounded-xl font-bold text-[14px] active:scale-95 transition-all hover:shadow-[0_0_20px_rgba(124,77,255,0.4)] mt-4">
+                        Access Dashboard
                     </button>
-                    <div class="text-center mt-1.5">
-                        <button type="button" onclick="toggleModal('forgotPasswordModal')" class="text-[11px] text-primary hover:underline font-semibold">Forgot your password?</button>
+                    <div class="text-center mt-3">
+                        <button type="button" onclick="toggleModal('forgotPasswordModal')" class="text-[11px] text-primary hover:text-[#9876ff] transition-colors font-semibold">Forgot your password?</button>
                     </div>
-                    <div class="relative flex py-1 items-center">
+                    <div class="relative flex py-3 items-center">
                         <div class="flex-grow border-t border-outline-variant/40"></div>
-                        <span class="flex-shrink mx-3 text-on-surface-variant text-[9px] uppercase font-bold">Or</span>
+                        <span class="flex-shrink mx-4 text-on-surface-variant text-[10px] uppercase font-bold tracking-wider">Or</span>
                         <div class="flex-grow border-t border-outline-variant/40"></div>
                     </div>
-                    <button type="button" onclick="handleGoogleSignIn()" class="w-full py-2.5 bg-zinc-900 hover:bg-zinc-800 border border-outline-variant rounded-xl text-xs text-on-surface font-bold active:scale-95 transition-all flex items-center justify-center gap-2">
+                    <button type="button" onclick="handleGoogleSignIn()" class="w-full py-3 bg-zinc-900/80 hover:bg-zinc-800 border border-outline-variant/60 rounded-xl text-[13px] text-on-surface font-bold active:scale-95 transition-all flex items-center justify-center gap-3">
                         <svg class="w-4 h-4" viewBox="0 0 24 24"><path fill="currentColor" d="M12.24 10.285V13.4h6.86c-.277 1.56-1.602 4.585-6.86 4.585-4.54 0-8.24-3.765-8.24-8.4s3.7-8.4 8.24-8.4c2.58 0 4.307 1.095 5.298 2.045l2.465-2.37C18.435 1.21 15.62 0 12.24 0 5.58 0 0 5.37 0 12s5.58 12 12.24 12c6.96 0 11.57-4.89 11.57-11.79 0-.795-.085-1.4-.195-1.925H12.24z"/></svg>
-                        Sign In with Google
+                        Continue with Google
                     </button>
                 </form>
 
                 <!-- Register Form -->
-                <form id="signup-form" onsubmit="handleAuthSignUp(event)" class="space-y-3 hidden">
+                <form id="signup-form" onsubmit="handleAuthSignUp(event)" class="space-y-4 hidden relative z-10 max-h-[380px] overflow-y-auto no-scrollbar pr-1">
                     <div class="grid grid-cols-2 gap-3">
                         <div>
-                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Full Name</label>
-                            <input type="text" id="signup-name" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface px-3 py-2 focus:border-primary focus:outline-none" placeholder="Your Name" required />
+                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5 ml-1">Full Name</label>
+                            <input type="text" id="signup-name" class="w-full bg-zinc-900/80 border border-outline-variant/60 rounded-xl text-[13px] text-on-surface px-3 py-2.5 focus:border-primary focus:outline-none focus:bg-zinc-900 transition-all" placeholder="Sarah Jenkins" required />
                         </div>
                         <div>
-                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Email</label>
-                            <input type="email" id="signup-email" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface px-3 py-2 focus:border-primary focus:outline-none" placeholder="you@example.com" required />
+                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5 ml-1">Email</label>
+                            <input type="email" id="signup-email" class="w-full bg-zinc-900/80 border border-outline-variant/60 rounded-xl text-[13px] text-on-surface px-3 py-2.5 focus:border-primary focus:outline-none focus:bg-zinc-900 transition-all" placeholder="sarah@edu.com" required />
                         </div>
                     </div>
                     <div>
-                        <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Password</label>
-                        <input type="password" id="signup-password" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface px-3 py-2 focus:border-primary focus:outline-none" placeholder="Min. 6 characters" required />
+                        <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5 ml-1">Password</label>
+                        <input type="password" id="signup-password" class="w-full bg-zinc-900/80 border border-outline-variant/60 rounded-xl text-[13px] text-on-surface px-3 py-2.5 focus:border-primary focus:outline-none focus:bg-zinc-900 transition-all" placeholder="Min. 6 characters" required />
                     </div>
                     <div class="grid grid-cols-2 gap-3">
-                        <div>
-                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">College</label>
-                            <input type="text" id="signup-college" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface px-3 py-2 focus:border-primary focus:outline-none" placeholder="College Name" />
+                        <div class="col-span-2">
+                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5 ml-1">University</label>
+                            <input type="text" id="signup-college" class="w-full bg-zinc-900/80 border border-outline-variant/60 rounded-xl text-[13px] text-on-surface px-3 py-2.5 focus:border-primary focus:outline-none focus:bg-zinc-900 transition-all" placeholder="Engineering College" required />
                         </div>
                         <div>
-                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Branch</label>
-                            <input type="text" id="signup-branch" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface px-3 py-2 focus:border-primary focus:outline-none" placeholder="e.g. CS" />
-                        </div>
-                    </div>
-                    <div class="grid grid-cols-2 gap-3">
-                        <div>
-                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Target (%)</label>
-                            <input type="number" id="signup-goal" min="60" max="99" value="75" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface px-3 py-2 focus:border-primary focus:outline-none" required />
+                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5 ml-1">Branch</label>
+                            <input type="text" id="signup-branch" class="w-full bg-zinc-900/80 border border-outline-variant/60 rounded-xl text-[13px] text-on-surface px-3 py-2.5 focus:border-primary focus:outline-none focus:bg-zinc-900 transition-all" placeholder="CS" required />
                         </div>
                         <div>
-                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Semester</label>
-                            <select id="signup-semester" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface px-3 py-2 focus:border-primary focus:outline-none">
-                                <option value="Semester 1">Sem 1</option>
-                                <option value="Semester 2">Sem 2</option>
-                                <option value="Semester 3">Sem 3</option>
-                                <option value="Semester 4">Sem 4</option>
-                                <option value="Semester 5">Sem 5</option>
-                                <option value="Semester 6">Sem 6</option>
-                                <option value="Semester 7">Sem 7</option>
-                                <option value="Semester 8">Sem 8</option>
-                            </select>
+                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5 ml-1">Target %</label>
+                            <input type="number" min="50" max="99" id="signup-goal" class="w-full bg-zinc-900/80 border border-outline-variant/60 rounded-xl text-[13px] text-on-surface px-3 py-2.5 focus:border-primary focus:outline-none focus:bg-zinc-900 transition-all" value="75" required />
                         </div>
                     </div>
-                    <button type="submit" class="w-full py-3 bg-primary text-on-primary rounded-xl font-bold text-[14px] active:scale-95 transition-all hover:bg-primary/90 mt-1">
+                    <div>
+                        <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5 ml-1">Semester</label>
+                        <select id="signup-semester" class="w-full bg-zinc-900/80 border border-outline-variant/60 rounded-xl text-[13px] text-on-surface px-3 py-2.5 focus:border-primary focus:outline-none focus:bg-zinc-900 transition-all">
+                            <option value="Semester 1 (Autumn)">Semester 1 (Autumn)</option>
+                            <option value="Semester 2 (Spring)">Semester 2 (Spring)</option>
+                            <option value="Semester 3 (Autumn)">Semester 3 (Autumn)</option>
+                            <option value="Semester 4 (Spring)">Semester 4 (Spring)</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="w-full py-3.5 bg-gradient-to-r from-primary to-[#9876ff] text-on-primary rounded-xl font-bold text-[14px] active:scale-95 transition-all hover:shadow-[0_0_20px_rgba(124,77,255,0.4)] mt-4">
                         Create Account
                     </button>
                 </form>
             </div>
-            <p class="text-center text-[11px] text-on-surface-variant mt-4">Student-only · No faculty or parent access · Private & Secure</p>
+            <p class="text-center text-[11px] text-on-surface-variant/70 mt-6 font-semibold uppercase tracking-widest">Student-only · Private & Secure</p>
         </div>
     </div>
 
@@ -498,99 +518,7 @@
         </div>
     </div>
 
-        <!-- Authentication Overlay Screen -->
-        <div id="auth-screen" class="absolute inset-0 z-[80] bg-background flex flex-col justify-center items-center px-6 no-scrollbar overflow-y-auto hidden">
-            <!-- Glow background context -->
-            <div class="absolute inset-0 pointer-events-none opacity-20">
-                <div class="absolute top-[-10%] right-[-10%] w-[20rem] h-[20rem] bg-primary-container/30 blur-[80px] rounded-full"></div>
-                <div class="absolute bottom-[-10%] left-[-10%] w-[20rem] h-[20rem] bg-secondary-container/20 blur-[80px] rounded-full"></div>
-            </div>
 
-            <div class="w-full max-w-[340px] flex flex-col items-center z-10 space-y-6">
-                <!-- App Identity -->
-                <div class="text-center space-y-1">
-                    <h1 class="font-display-lg text-[32px] font-extrabold text-primary tracking-tight">AttendWise</h1>
-                    <p class="text-[11px] text-on-surface-variant uppercase tracking-widest font-semibold">AI Student Attendance Companion</p>
-                </div>
-
-                <!-- Tab Swapper Switcher -->
-                <div class="flex p-1 bg-surface-container rounded-2xl border border-outline-variant/60 w-full">
-                    <button id="auth-tab-signin" onclick="switchAuthTab('signin')" class="flex-1 py-2 text-center text-label-md rounded-xl font-bold transition-all bg-surface-container-high text-on-surface shadow-sm">
-                        Sign In
-                    </button>
-                    <button id="auth-tab-signup" onclick="switchAuthTab('signup')" class="flex-1 py-2 text-center text-label-md rounded-xl font-bold transition-all text-on-surface-variant hover:text-on-surface">
-                        Sign Up
-                    </button>
-                </div>
-
-                <!-- 1. SIGN IN FORM -->
-                <form id="signin-form" onsubmit="handleAuthSignIn(event)" class="w-full space-y-4">
-                    <div class="glass-card rounded-3xl p-5 border border-outline-variant/40 space-y-3.5">
-                        <div>
-                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Email Address</label>
-                            <input type="email" id="signin-email" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface p-2.5 focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none" placeholder="e.g. sarah@example.com" required />
-                        </div>
-                        <div>
-                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Password</label>
-                            <input type="password" id="signin-password" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface p-2.5 focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none" placeholder="••••••••" required />
-                        </div>
-                    </div>
-                    
-                    <button type="submit" class="w-full py-2.5 bg-primary text-on-primary rounded-xl font-bold text-[14px] active:scale-95 transition-all hover:bg-primary-container hover:text-on-primary-container shadow-[0_0_15px_rgba(124,77,255,0.3)]">
-                        Sign In
-                    </button>
-                    <div class="text-center mt-2">
-                        <button type="button" onclick="toggleModal('forgotPasswordModal')" class="text-[11px] text-primary hover:underline font-semibold">Forgot your password?</button>
-                    </div>
-
-                </form>
-
-                <!-- 2. SIGN UP FORM -->
-                <form id="signup-form" onsubmit="handleAuthSignUp(event)" class="w-full space-y-4 hidden max-h-[380px] overflow-y-auto no-scrollbar">
-                    <div class="glass-card rounded-3xl p-5 border border-outline-variant/40 space-y-3.5">
-                        <div>
-                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Full Name</label>
-                            <input type="text" id="signup-name" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface p-2.5 focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none" placeholder="Sarah Jenkins" required />
-                        </div>
-                        <div>
-                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Email Address</label>
-                            <input type="email" id="signup-email" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface p-2.5 focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none" placeholder="sarah@example.com" required />
-                        </div>
-                        <div>
-                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Password</label>
-                            <input type="password" id="signup-password" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface p-2.5 focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none" placeholder="Min. 6 characters" required />
-                        </div>
-                        <div>
-                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">College / University</label>
-                            <input type="text" id="signup-college" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface p-2.5 focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none" placeholder="Engineering College" required />
-                        </div>
-                        <div class="grid grid-cols-2 gap-2">
-                            <div>
-                                <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Branch</label>
-                                <input type="text" id="signup-branch" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface p-2.5 focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none" placeholder="CS" required />
-                            </div>
-                            <div>
-                                <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Target %</label>
-                                <input type="number" min="50" max="99" id="signup-goal" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface p-2.5 focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none" value="75" required />
-                            </div>
-                        </div>
-                        <div>
-                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Semester</label>
-                            <select id="signup-semester" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface p-2.5 focus:border-primary focus:outline-none">
-                                <option value="Semester 1 (Autumn)">Semester 1 (Autumn)</option>
-                                <option value="Semester 2 (Spring)">Semester 2 (Spring)</option>
-                                <option value="Semester 3 (Autumn)">Semester 3 (Autumn)</option>
-                                <option value="Semester 4 (Spring)">Semester 4 (Spring)</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <button type="submit" class="w-full py-2.5 bg-primary text-on-primary rounded-xl font-bold text-[14px] active:scale-95 transition-all hover:bg-primary-container hover:text-on-primary-container shadow-[0_0_15px_rgba(124,77,255,0.3)]">
-                        Register Account
-                    </button>
-                </form>
-            </div>
-        </div>
 
         <!-- Scrollable Main Content -->
         <main id="main-content" class="flex-1 overflow-y-auto p-8">
