@@ -1,0 +1,1751 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>AttendWise – AI Student Attendance Companion</title>
+    <meta name="description" content="AttendWise is an AI-powered student attendance monitoring companion that helps track, predict, and optimize your academic attendance."/>
+    <!-- Tailwind CSS with Forms and Container Queries -->
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <!-- Google Fonts: Inter, Geist, Material Symbols Outlined -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+    <!-- jsPDF + AutoTable for client-side PDF generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+    
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#cdbdff">
+    
+    <script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "surface-container-high": "#2a2a2a",
+              "secondary-fixed-dim": "#3ce36a",
+              "primary": "#cdbdff",
+              "outline-variant": "#494455",
+              "secondary": "#40e56c",
+              "tertiary-container": "#d53338",
+              "inverse-primary": "#6833ea",
+              "on-primary-fixed": "#20005f",
+              "surface-tint": "#cdbdff",
+              "primary-fixed-dim": "#cdbdff",
+              "on-surface-variant": "#cac3d8",
+              "inverse-surface": "#e5e2e1",
+              "on-background": "#e5e2e1",
+              "on-tertiary-fixed-variant": "#930015",
+              "surface-dim": "#131313",
+              "surface-container-low": "#1c1b1b",
+              "tertiary": "#ffb3ae",
+              "surface-container": "#201f1f",
+              "surface-container-highest": "#353534",
+              "on-surface": "#e5e2e1",
+              "outline": "#948ea1",
+              "background": "#131313",
+              "primary-fixed": "#e8deff",
+              "primary-container": "#7c4dff",
+              "on-secondary-fixed": "#002108",
+              "surface-container-lowest": "#0e0e0e",
+              "surface": "#131313",
+              "on-primary-fixed-variant": "#4f00d0",
+              "inverse-on-surface": "#313030",
+              "tertiary-fixed-dim": "#ffb3ae",
+              "surface-variant": "#353534",
+              "tertiary-fixed": "#ffdad7",
+              "secondary-fixed": "#69ff87",
+              "error": "#ffb4ab",
+              "on-error-container": "#ffdad6",
+              "on-tertiary-container": "#fff6f5",
+              "on-primary-container": "#fcf6ff",
+              "on-primary": "#370096",
+              "on-secondary-container": "#004d1b",
+              "surface-bright": "#393939",
+              "secondary-container": "#02c953",
+              "on-secondary": "#003912",
+              "on-secondary-fixed-variant": "#00531e",
+              "on-tertiary-fixed": "#410004",
+              "on-tertiary": "#68000c",
+              "on-error": "#690005",
+              "error-container": "#93000a"
+            },
+            borderRadius: {
+              "DEFAULT": "0.25rem",
+              "lg": "0.5rem",
+              "xl": "0.75rem",
+              "full": "9999px"
+            },
+            spacing: {
+              "xs": "4px",
+              "margin-desktop": "32px",
+              "lg": "40px",
+              "gutter": "16px",
+              "xl": "64px",
+              "max-width": "1200px",
+              "sm": "12px",
+              "margin-mobile": "16px",
+              "base": "8px",
+              "md": "24px"
+            },
+            fontFamily: {
+              "label-md": ["Geist", "sans-serif"],
+              "headline-lg": ["Inter", "sans-serif"],
+              "display-lg": ["Inter", "sans-serif"],
+              "body-md": ["Inter", "sans-serif"],
+              "headline-md": ["Inter", "sans-serif"],
+              "label-sm": ["Geist", "sans-serif"],
+              "body-lg": ["Inter", "sans-serif"],
+              "headline-lg-mobile": ["Inter", "sans-serif"]
+            },
+            fontSize: {
+              "label-md": ["14px", {"lineHeight": "20px", "letterSpacing": "0.02em", "fontWeight": "500"}],
+              "headline-lg": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.01em", "fontWeight": "700"}],
+              "display-lg": ["48px", {"lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+              "body-md": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+              "headline-md": ["24px", {"lineHeight": "32px", "fontWeight": "600"}],
+              "label-sm": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600"}],
+              "body-lg": ["18px", {"lineHeight": "28px", "fontWeight": "400"}],
+              "headline-lg-mobile": ["24px", {"lineHeight": "32px", "fontWeight": "700"}]
+            }
+          },
+        },
+      }
+    </script>
+    
+    <style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            user-select: none;
+        }
+        
+        .progress-ring__circle {
+            transition: stroke-dashoffset 1s cubic-bezier(0.4, 0, 0.2, 1);
+            transform: rotate(-90deg);
+            transform-origin: 50% 50%;
+        }
+
+        .neon-glow-primary {
+            filter: drop-shadow(0 0 12px rgba(124, 77, 255, 0.4));
+        }
+        
+        .neon-glow-secondary {
+            filter: drop-shadow(0 0 12px rgba(64, 229, 108, 0.3));
+        }
+
+        .glass-card {
+            background: rgba(32, 31, 31, 0.55);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(73, 68, 85, 0.3);
+        }
+
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+
+        /* Nav Item Active Style */
+        .nav-item-active {
+            background-color: #7c4dff;
+            color: #fcf6ff;
+            box-shadow: 0 0 12px rgba(124, 77, 255, 0.5);
+        }
+
+        /* SVG Graph Animation */
+        .chart-path {
+            stroke-dasharray: 1000;
+            stroke-dashoffset: 1000;
+            animation: drawPath 2s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+        }
+        @keyframes drawPath {
+            to { stroke-dashoffset: 0; }
+        }
+
+        .calendar-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+        }
+
+        /* Sidebar nav active state */
+        .nav-link-active {
+            background: rgba(124, 77, 255, 0.15);
+            color: #cdbdff;
+            border-left: 3px solid #cdbdff;
+        }
+        .nav-link-active .material-symbols-outlined {
+            font-variation-settings: 'FILL' 1, 'wght' 500, 'GRAD' 0, 'opsz' 24;
+        }
+        .nav-link {
+            border-left: 3px solid transparent;
+        }
+        /* Scrollbar for main content */
+        #main-content::-webkit-scrollbar { width: 5px; }
+        #main-content::-webkit-scrollbar-track { background: transparent; }
+        #main-content::-webkit-scrollbar-thumb { background: #494455; border-radius: 3px; }
+
+        /* Attendance card entrance animation */
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(12px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        .animate-fade-in-up {
+            animation: fadeInUp 0.35s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+        }
+
+        /* Subject bar fill animation */
+        @keyframes fillBar {
+            from { width: 0%; }
+        }
+        .progress-fill-animate {
+            animation: fillBar 0.9s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+        }
+
+        /* Pulse glow for active/critical items */
+        @keyframes pulseGlow {
+            0%, 100% { box-shadow: 0 0 6px rgba(255,82,82,0.3); }
+            50%       { box-shadow: 0 0 16px rgba(255,82,82,0.7); }
+        }
+        .critical-glow {
+            animation: pulseGlow 1.8s ease-in-out infinite;
+        }
+
+        /* Tab view transition */
+        .tab-view {
+            animation: fadeInUp 0.3s ease-out;
+        }
+
+        /* Shimmer loading */
+        @keyframes shimmer {
+            0% { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+        }
+        .shimmer-loading {
+            background: linear-gradient(90deg, #201f1f 25%, #353534 50%, #201f1f 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+        }
+
+        /* Notification badge bounce */
+        @keyframes badgeBounce {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.2); }
+        }
+        .notif-badge-bounce {
+            animation: badgeBounce 0.6s ease-out;
+        }
+
+        /* Slide-down for notification panel */
+        @keyframes slideDown {
+            from { opacity: 0; transform: translateY(-8px) scale(0.97); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        .animate-slide-down {
+            animation: slideDown 0.2s ease-out forwards;
+        }
+
+        /* Mobile responsive */
+        @media (max-width: 768px) {
+            #desktop-sidebar { display: none !important; }
+            #mobile-bottom-nav { display: flex !important; }
+            #mobile-hamburger-btn { display: flex !important; }
+            #main-content { padding: 16px !important; }
+            .grid-cols-4 { grid-template-columns: repeat(2, 1fr) !important; }
+            .grid-cols-3 { grid-template-columns: repeat(1, 1fr) !important; }
+            .grid-cols-5 { grid-template-columns: repeat(1, 1fr) !important; }
+            .col-span-2, .col-span-3 { grid-column: span 1 !important; }
+        }
+        @media (max-width: 480px) {
+            .grid-cols-4, .grid-cols-2 { grid-template-columns: repeat(1, 1fr) !important; }
+        }
+
+        /* Leave plan type badge colors */
+        .leave-medical { background: rgba(255,82,82,0.15); color: #ff5252; border: 1px solid rgba(255,82,82,0.2); }
+        .leave-duty { background: rgba(124,77,255,0.15); color: #cdbdff; border: 1px solid rgba(124,77,255,0.2); }
+        .leave-holiday { background: rgba(64,229,108,0.15); color: #40e56c; border: 1px solid rgba(64,229,108,0.2); }
+        .leave-personal { background: rgba(255,179,174,0.15); color: #ffb3ae; border: 1px solid rgba(255,179,174,0.2); }
+    </style>
+
+    <!-- PWA Service Worker Registration -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').then((registration) => {
+            console.log('ServiceWorker registration successful with scope: ', registration.scope);
+          }, (err) => {
+            console.log('ServiceWorker registration failed: ', err);
+          });
+        });
+      }
+    </script>
+  <script type="module" crossorigin src="/assets/index-Dd_kD3Hn.js"></script>
+</head>
+<body class="bg-background text-on-background font-body-md h-screen overflow-hidden flex selection:bg-primary/30">
+
+    <!-- Atmospheric background glows -->
+    <div class="fixed top-0 left-0 w-full h-full -z-10 pointer-events-none opacity-20">
+        <div class="absolute top-[-10%] right-[-10%] w-[40rem] h-[40rem] bg-primary-container/20 blur-[160px] rounded-full"></div>
+        <div class="absolute bottom-[-10%] left-[15%] w-[40rem] h-[40rem] bg-secondary-container/10 blur-[160px] rounded-full"></div>
+    </div>
+
+    <!-- AUTH SCREEN OVERLAY -->
+    <div id="auth-screen" class="fixed inset-0 z-[200] flex items-center justify-center bg-background/95 backdrop-blur-sm">
+        <!-- Background glow effects -->
+        <div class="absolute inset-0 pointer-events-none overflow-hidden">
+            <div class="absolute top-[-15%] right-[20%] w-[35rem] h-[35rem] bg-primary-container/25 blur-[140px] rounded-full"></div>
+            <div class="absolute bottom-[-10%] left-[10%] w-[30rem] h-[30rem] bg-secondary-container/20 blur-[140px] rounded-full"></div>
+        </div>
+
+        <div class="relative w-full max-w-sm mx-4">
+            <!-- Logo / Title -->
+            <div class="text-center mb-8">
+                <div class="w-16 h-16 rounded-3xl bg-primary/10 border border-primary/20 flex items-center justify-center mx-auto mb-4">
+                    <span class="material-symbols-outlined text-primary text-[36px]">school</span>
+                </div>
+                <h1 class="font-bold text-[28px] text-primary leading-none">AttendWise</h1>
+                <p class="text-[13px] text-on-surface-variant mt-1.5">AI-Powered Student Attendance Companion</p>
+            </div>
+
+            <!-- Glass card -->
+            <div class="glass-card rounded-3xl p-6 border border-outline-variant/40">
+                <!-- Tab switcher -->
+                <div class="flex p-1 bg-surface-container rounded-2xl border border-outline-variant mb-5">
+                    <button id="auth-tab-signin" onclick="switchAuthTab('signin')" class="flex-1 py-2 text-center text-[13px] rounded-xl font-bold transition-all bg-surface-container-high text-on-surface shadow-sm">Sign In</button>
+                    <button id="auth-tab-signup" onclick="switchAuthTab('signup')" class="flex-1 py-2 text-center text-[13px] rounded-xl font-bold transition-all text-on-surface-variant hover:text-on-surface">Register</button>
+                </div>
+
+                <!-- Sign In Form -->
+                <form id="signin-form" onsubmit="handleAuthSignIn(event)" class="space-y-4">
+                    <div>
+                        <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Email Address</label>
+                        <input type="email" id="signin-email" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface px-3 py-2.5 focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none" placeholder="you@example.com" required />
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Password</label>
+                        <input type="password" id="signin-password" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface px-3 py-2.5 focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none" placeholder="••••••••" required />
+                    </div>
+                    <button type="submit" class="w-full py-3 bg-primary text-on-primary rounded-xl font-bold text-[14px] active:scale-95 transition-all hover:bg-primary/90 mt-2">
+                        Sign In
+                    </button>
+                    <div class="text-center mt-1.5">
+                        <button type="button" onclick="toggleModal('forgotPasswordModal')" class="text-[11px] text-primary hover:underline font-semibold">Forgot your password?</button>
+                    </div>
+                    <div class="relative flex py-1 items-center">
+                        <div class="flex-grow border-t border-outline-variant/40"></div>
+                        <span class="flex-shrink mx-3 text-on-surface-variant text-[9px] uppercase font-bold">Or</span>
+                        <div class="flex-grow border-t border-outline-variant/40"></div>
+                    </div>
+                    <button type="button" onclick="handleGoogleSignIn()" class="w-full py-2.5 bg-zinc-900 hover:bg-zinc-800 border border-outline-variant rounded-xl text-xs text-on-surface font-bold active:scale-95 transition-all flex items-center justify-center gap-2">
+                        <svg class="w-4 h-4" viewBox="0 0 24 24"><path fill="currentColor" d="M12.24 10.285V13.4h6.86c-.277 1.56-1.602 4.585-6.86 4.585-4.54 0-8.24-3.765-8.24-8.4s3.7-8.4 8.24-8.4c2.58 0 4.307 1.095 5.298 2.045l2.465-2.37C18.435 1.21 15.62 0 12.24 0 5.58 0 0 5.37 0 12s5.58 12 12.24 12c6.96 0 11.57-4.89 11.57-11.79 0-.795-.085-1.4-.195-1.925H12.24z"/></svg>
+                        Sign In with Google
+                    </button>
+                </form>
+
+                <!-- Register Form -->
+                <form id="signup-form" onsubmit="handleAuthSignUp(event)" class="space-y-3 hidden">
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Full Name</label>
+                            <input type="text" id="signup-name" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface px-3 py-2 focus:border-primary focus:outline-none" placeholder="Your Name" required />
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Email</label>
+                            <input type="email" id="signup-email" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface px-3 py-2 focus:border-primary focus:outline-none" placeholder="you@example.com" required />
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Password</label>
+                        <input type="password" id="signup-password" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface px-3 py-2 focus:border-primary focus:outline-none" placeholder="Min. 6 characters" required />
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">College</label>
+                            <input type="text" id="signup-college" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface px-3 py-2 focus:border-primary focus:outline-none" placeholder="College Name" />
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Branch</label>
+                            <input type="text" id="signup-branch" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface px-3 py-2 focus:border-primary focus:outline-none" placeholder="e.g. CS" />
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Target (%)</label>
+                            <input type="number" id="signup-goal" min="60" max="99" value="75" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface px-3 py-2 focus:border-primary focus:outline-none" required />
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Semester</label>
+                            <select id="signup-semester" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface px-3 py-2 focus:border-primary focus:outline-none">
+                                <option value="Semester 1">Sem 1</option>
+                                <option value="Semester 2">Sem 2</option>
+                                <option value="Semester 3">Sem 3</option>
+                                <option value="Semester 4">Sem 4</option>
+                                <option value="Semester 5">Sem 5</option>
+                                <option value="Semester 6">Sem 6</option>
+                                <option value="Semester 7">Sem 7</option>
+                                <option value="Semester 8">Sem 8</option>
+                            </select>
+                        </div>
+                    </div>
+                    <button type="submit" class="w-full py-3 bg-primary text-on-primary rounded-xl font-bold text-[14px] active:scale-95 transition-all hover:bg-primary/90 mt-1">
+                        Create Account
+                    </button>
+                </form>
+            </div>
+            <p class="text-center text-[11px] text-on-surface-variant mt-4">Student-only · No faculty or parent access · Private & Secure</p>
+        </div>
+    </div>
+
+    <!-- SIDEBAR (Desktop) -->
+    <aside id="desktop-sidebar" class="w-60 h-screen bg-surface-container-low border-r border-outline-variant/30 flex flex-col flex-shrink-0">
+        <div class="px-5 py-5 border-b border-outline-variant/20 flex items-center gap-3">
+            <div class="w-9 h-9 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0">
+                <span class="material-symbols-outlined text-primary text-[20px]">school</span>
+            </div>
+            <div><h1 class="font-bold text-[17px] text-primary leading-none">AttendWise</h1><p class="text-[10px] text-on-surface-variant mt-0.5">AI Attendance</p></div>
+        </div>
+        <nav class="flex-1 px-3 py-4 space-y-0.5">
+            <button id="nav-btn-dashboard" onclick="tabNavigation('dashboard')" class="nav-link w-full flex items-center gap-3 px-4 py-3 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-all duration-150 text-left font-semibold text-sm">
+                <span class="material-symbols-outlined text-[20px]">dashboard</span> Dashboard
+            </button>
+            <button id="nav-btn-daily" onclick="tabNavigation('daily')" class="nav-link w-full flex items-center gap-3 px-4 py-3 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-all duration-150 text-left font-semibold text-sm">
+                <span class="material-symbols-outlined text-[20px]">fact_check</span> Daily Log
+            </button>
+            <button id="nav-btn-analytics" onclick="tabNavigation('analytics')" class="nav-link w-full flex items-center gap-3 px-4 py-3 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-all duration-150 text-left font-semibold text-sm">
+                <span class="material-symbols-outlined text-[20px]">analytics</span> Analytics
+            </button>
+            <button id="nav-btn-reports" onclick="tabNavigation('reports')" class="nav-link w-full flex items-center gap-3 px-4 py-3 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-all duration-150 text-left font-semibold text-sm">
+                <span class="material-symbols-outlined text-[20px]">description</span> Reports
+            </button>
+            <button id="nav-btn-schedule" onclick="tabNavigation('schedule')" class="nav-link w-full flex items-center gap-3 px-4 py-3 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-all duration-150 text-left font-semibold text-sm">
+                <span class="material-symbols-outlined text-[20px]">calendar_today</span> Schedule
+            </button>
+        </nav>
+        <div class="px-4 py-4 border-t border-outline-variant/20">
+            <button onclick="openProfileModal()" class="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-surface-container-high transition-colors text-left">
+                <div id="header-avatar-container" class="w-8 h-8 rounded-full bg-surface-container-highest border border-outline-variant flex items-center justify-center flex-shrink-0 overflow-hidden">
+                    <span id="header-avatar-icon" class="material-symbols-outlined text-[16px] text-on-surface-variant">person</span>
+                    <img id="header-avatar-img" class="w-full h-full object-cover hidden" src="" alt="avatar"/>
+                </div>
+                <div class="flex-1 min-w-0">
+                    <p id="header-student-name" class="font-semibold text-[13px] text-on-surface truncate">Sarah Jenkins</p>
+                    <p class="text-[11px] text-on-surface-variant">Profile & Settings</p>
+                </div>
+                <span class="material-symbols-outlined text-[16px] text-on-surface-variant">settings</span>
+            </button>
+        </div>
+    </aside>
+
+    <!-- MAIN AREA -->
+    <div class="flex-1 flex flex-col h-screen overflow-hidden">
+
+    <!-- Top Header -->
+    <header class="h-16 bg-surface-container-low/80 backdrop-blur-md border-b border-outline-variant/30 flex items-center justify-between px-8 flex-shrink-0">
+        <div class="flex items-center gap-3">
+            <!-- Mobile hamburger -->
+            <button id="mobile-hamburger-btn" onclick="toggleMobileSidebar()" class="hidden items-center justify-center p-2 rounded-xl hover:bg-surface-container-high text-on-surface-variant">
+                <span class="material-symbols-outlined text-[22px]">menu</span>
+            </button>
+            <div>
+                <h2 id="page-title" class="font-bold text-[18px] text-on-surface">Dashboard</h2>
+                <p id="page-subtitle" class="text-[11px] text-on-surface-variant mt-0.5">Overview of your attendance performance</p>
+            </div>
+        </div>
+        <div class="flex items-center gap-3">
+            <!-- Notification Bell -->
+            <div class="relative">
+                <button id="notif-bell-btn" onclick="toggleNotificationPanel()" class="relative flex items-center justify-center p-2 rounded-xl hover:bg-surface-container-high text-on-surface-variant hover:text-primary transition-colors">
+                    <span class="material-symbols-outlined text-[20px]">notifications</span>
+                    <span id="notif-badge" class="hidden absolute -top-0.5 -right-0.5 w-4.5 h-4.5 min-w-[18px] bg-error text-[9px] font-bold text-white rounded-full flex items-center justify-center notif-badge-bounce">0</span>
+                </button>
+                <!-- Notification Dropdown Panel -->
+                <div id="notif-panel" class="hidden absolute right-0 top-12 w-80 max-h-[400px] overflow-y-auto no-scrollbar bg-surface-container-high/95 backdrop-blur-xl border border-outline-variant rounded-2xl shadow-2xl z-50 animate-slide-down">
+                    <div class="flex items-center justify-between p-4 border-b border-outline-variant/30">
+                        <h3 class="font-bold text-[14px] text-on-surface">Notifications</h3>
+                        <button onclick="markAllNotificationsRead()" class="text-[10px] font-bold text-primary uppercase tracking-wider hover:text-primary/80">Mark all read</button>
+                    </div>
+                    <div id="notif-list" class="p-2 space-y-1">
+                        <div class="text-center py-6 text-on-surface-variant/60 text-[12px]">No notifications yet</div>
+                    </div>
+                </div>
+            </div>
+            <button onclick="triggerGreetingNotification()" class="flex items-center gap-2 px-4 py-2 bg-surface-container hover:bg-surface-container-high border border-outline-variant rounded-xl transition-colors text-on-surface-variant hover:text-primary text-sm font-semibold">
+                <span class="material-symbols-outlined text-[18px]">auto_awesome</span> AI Insights
+            </button>
+        </div>
+    </header>
+
+    <!-- Toast (fixed top-right) -->
+    <div id="toast-notification" class="fixed top-5 right-5 z-[99] w-80 bg-surface-container-high/95 backdrop-blur-md border border-outline-variant p-4 rounded-2xl flex items-start gap-3 shadow-2xl transform translate-x-[120%] transition-transform duration-500 ease-out pointer-events-none">
+        <div class="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-primary flex-shrink-0">
+            <span class="material-symbols-outlined text-[18px]" id="toast-icon">notifications</span>
+        </div>
+        <div class="flex-1">
+            <h4 class="font-bold text-[13px] text-primary" id="toast-title">Notification</h4>
+            <p class="text-[12px] text-on-surface-variant leading-snug mt-0.5" id="toast-message">Hello! Welcome to AttendWise.</p>
+        </div>
+    </div>
+
+        <!-- Authentication Overlay Screen -->
+        <div id="auth-screen" class="absolute inset-0 z-[80] bg-background flex flex-col justify-center items-center px-6 no-scrollbar overflow-y-auto hidden">
+            <!-- Glow background context -->
+            <div class="absolute inset-0 pointer-events-none opacity-20">
+                <div class="absolute top-[-10%] right-[-10%] w-[20rem] h-[20rem] bg-primary-container/30 blur-[80px] rounded-full"></div>
+                <div class="absolute bottom-[-10%] left-[-10%] w-[20rem] h-[20rem] bg-secondary-container/20 blur-[80px] rounded-full"></div>
+            </div>
+
+            <div class="w-full max-w-[340px] flex flex-col items-center z-10 space-y-6">
+                <!-- App Identity -->
+                <div class="text-center space-y-1">
+                    <h1 class="font-display-lg text-[32px] font-extrabold text-primary tracking-tight">AttendWise</h1>
+                    <p class="text-[11px] text-on-surface-variant uppercase tracking-widest font-semibold">AI Student Attendance Companion</p>
+                </div>
+
+                <!-- Tab Swapper Switcher -->
+                <div class="flex p-1 bg-surface-container rounded-2xl border border-outline-variant/60 w-full">
+                    <button id="auth-tab-signin" onclick="switchAuthTab('signin')" class="flex-1 py-2 text-center text-label-md rounded-xl font-bold transition-all bg-surface-container-high text-on-surface shadow-sm">
+                        Sign In
+                    </button>
+                    <button id="auth-tab-signup" onclick="switchAuthTab('signup')" class="flex-1 py-2 text-center text-label-md rounded-xl font-bold transition-all text-on-surface-variant hover:text-on-surface">
+                        Sign Up
+                    </button>
+                </div>
+
+                <!-- 1. SIGN IN FORM -->
+                <form id="signin-form" onsubmit="handleAuthSignIn(event)" class="w-full space-y-4">
+                    <div class="glass-card rounded-3xl p-5 border border-outline-variant/40 space-y-3.5">
+                        <div>
+                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Email Address</label>
+                            <input type="email" id="signin-email" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface p-2.5 focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none" placeholder="e.g. sarah@example.com" required />
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Password</label>
+                            <input type="password" id="signin-password" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface p-2.5 focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none" placeholder="••••••••" required />
+                        </div>
+                    </div>
+                    
+                    <button type="submit" class="w-full py-2.5 bg-primary text-on-primary rounded-xl font-bold text-[14px] active:scale-95 transition-all hover:bg-primary-container hover:text-on-primary-container shadow-[0_0_15px_rgba(124,77,255,0.3)]">
+                        Sign In
+                    </button>
+                    <div class="text-center mt-2">
+                        <button type="button" onclick="toggleModal('forgotPasswordModal')" class="text-[11px] text-primary hover:underline font-semibold">Forgot your password?</button>
+                    </div>
+
+                </form>
+
+                <!-- 2. SIGN UP FORM -->
+                <form id="signup-form" onsubmit="handleAuthSignUp(event)" class="w-full space-y-4 hidden max-h-[380px] overflow-y-auto no-scrollbar">
+                    <div class="glass-card rounded-3xl p-5 border border-outline-variant/40 space-y-3.5">
+                        <div>
+                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Full Name</label>
+                            <input type="text" id="signup-name" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface p-2.5 focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none" placeholder="Sarah Jenkins" required />
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Email Address</label>
+                            <input type="email" id="signup-email" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface p-2.5 focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none" placeholder="sarah@example.com" required />
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Password</label>
+                            <input type="password" id="signup-password" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface p-2.5 focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none" placeholder="Min. 6 characters" required />
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">College / University</label>
+                            <input type="text" id="signup-college" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface p-2.5 focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none" placeholder="Engineering College" required />
+                        </div>
+                        <div class="grid grid-cols-2 gap-2">
+                            <div>
+                                <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Branch</label>
+                                <input type="text" id="signup-branch" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface p-2.5 focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none" placeholder="CS" required />
+                            </div>
+                            <div>
+                                <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Target %</label>
+                                <input type="number" min="50" max="99" id="signup-goal" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface p-2.5 focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none" value="75" required />
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Semester</label>
+                            <select id="signup-semester" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface p-2.5 focus:border-primary focus:outline-none">
+                                <option value="Semester 1 (Autumn)">Semester 1 (Autumn)</option>
+                                <option value="Semester 2 (Spring)">Semester 2 (Spring)</option>
+                                <option value="Semester 3 (Autumn)">Semester 3 (Autumn)</option>
+                                <option value="Semester 4 (Spring)">Semester 4 (Spring)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="w-full py-2.5 bg-primary text-on-primary rounded-xl font-bold text-[14px] active:scale-95 transition-all hover:bg-primary-container hover:text-on-primary-container shadow-[0_0_15px_rgba(124,77,255,0.3)]">
+                        Register Account
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Scrollable Main Content -->
+        <main id="main-content" class="flex-1 overflow-y-auto p-8">
+
+            <!-- ------------------------------------------------------------- -->
+            <!-- 1. DASHBOARD VIEW -->
+            <!-- ------------------------------------------------------------- -->
+            <div id="tab-view-dashboard" class="tab-view space-y-6">
+                <!-- Setup Banner (visible if no active semester) -->
+                <div id="dashboard-setup-banner" class="glass-card rounded-2xl p-5 bg-gradient-to-r from-primary/10 via-primary/5 to-transparent border-l-4 border-l-primary flex items-center justify-between">
+                    <div class="space-y-1">
+                        <h3 class="font-extrabold text-[15px] text-on-surface flex items-center gap-2">
+                            <span class="material-symbols-outlined text-primary text-[20px]">auto_awesome</span> Set Up Your Academic Semester
+                        </h3>
+                        <p class="text-[12px] text-on-surface-variant max-w-xl">
+                            Upload your timetable (Image or PDF) and configure your semester dates. AttendWise will automatically schedule your classes, compute your working days, and predict bunk requirements.
+                        </p>
+                    </div>
+                    <button onclick="toggleModal('ocrModal')" class="px-5 py-2.5 bg-primary text-on-primary rounded-xl font-bold text-sm active:scale-95 transition-all flex items-center gap-2 shadow-[0_0_12px_rgba(124,77,255,0.3)]">
+                        <span class="material-symbols-outlined text-[18px]">center_focus_strong</span> AI Timetable Scan
+                    </button>
+                </div>
+
+                <!-- Semester Analytics Card (visible if active semester exists) -->
+                <div id="dashboard-semester-card" class="glass-card rounded-2xl p-5 hidden relative overflow-hidden group border border-outline-variant/40">
+                    <div class="absolute right-0 top-0 opacity-[0.03] p-4 pointer-events-none"><span class="material-symbols-outlined text-[100px]">calendar_month</span></div>
+                    <div class="flex items-center justify-between mb-4 border-b border-outline-variant/20 pb-3">
+                        <div>
+                            <h3 class="font-extrabold text-[15px] text-on-surface flex items-center gap-1.5">
+                                <span class="material-symbols-outlined text-primary text-[18px]">event_available</span>
+                                Academic Semester Progress & Targets
+                            </h3>
+                            <p id="sem-card-date-range" class="text-[11px] text-on-surface-variant mt-0.5">Start: - | End: -</p>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <span id="sem-card-progress-pill" class="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-secondary/15 text-secondary border border-secondary/20 shadow-[0_0_8px_rgba(64,229,108,0.2)]">Active</span>
+                            <button onclick="toggleModal('ocrModal')" class="text-[11px] font-bold text-primary hover:underline flex items-center gap-0.5">
+                                <span class="material-symbols-outlined text-[14px]">edit_calendar</span> Re-upload
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <!-- Stats Grid -->
+                        <div class="md:col-span-2 grid grid-cols-2 gap-3">
+                            <div class="bg-surface-container-low p-3 rounded-xl border border-outline-variant/30 flex flex-col justify-between">
+                                <p class="text-[9px] text-on-surface-variant uppercase tracking-wider font-bold">Semester Length</p>
+                                <div class="mt-2">
+                                    <p id="sem-card-length-days" class="font-extrabold text-[18px] text-on-surface leading-none">-</p>
+                                    <p id="sem-card-length-weeks" class="text-[10px] text-on-surface-variant mt-1">-</p>
+                                </div>
+                            </div>
+                            <div class="bg-surface-container-low p-3 rounded-xl border border-outline-variant/30 flex flex-col justify-between">
+                                <p class="text-[9px] text-on-surface-variant uppercase tracking-wider font-bold">Working Days</p>
+                                <div class="mt-2">
+                                    <p id="sem-card-working-days" class="font-extrabold text-[18px] text-secondary leading-none">-</p>
+                                    <p id="sem-card-working-remaining" class="text-[10px] text-on-surface-variant mt-1">-</p>
+                                </div>
+                            </div>
+                            <div class="bg-surface-container-low p-3 rounded-xl border border-outline-variant/30 flex flex-col justify-between">
+                                <p class="text-[9px] text-on-surface-variant uppercase tracking-wider font-bold">Classes Remaining</p>
+                                <div class="mt-2">
+                                    <p id="sem-card-classes-remaining" class="font-extrabold text-[18px] text-primary leading-none">-</p>
+                                    <p id="sem-card-expected-total" class="text-[10px] text-on-surface-variant mt-1">-</p>
+                                </div>
+                            </div>
+                            <div class="bg-surface-container-low p-3 rounded-xl border border-outline-variant/30 flex flex-col justify-between">
+                                <p class="text-[9px] text-on-surface-variant uppercase tracking-wider font-bold">Daily target</p>
+                                <div class="mt-2">
+                                    <p id="sem-card-daily-target" class="font-extrabold text-[18px] text-tertiary leading-none">-</p>
+                                    <p class="text-[10px] text-on-surface-variant mt-1">Attend minimum today</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Predictor Table Card -->
+                        <div class="md:col-span-2 bg-surface-container-low p-3.5 rounded-xl border border-outline-variant/30 flex flex-col">
+                            <p class="text-[10px] text-on-surface-variant uppercase tracking-wider font-bold mb-2 flex items-center gap-1">
+                                <span class="material-symbols-outlined text-[14px] text-primary">analytics</span>
+                                End-of-Semester Attendance Predictor
+                            </p>
+                            <div class="flex-1 overflow-y-auto no-scrollbar">
+                                <table class="w-full text-left text-[11px] mt-0.5">
+                                    <thead>
+                                        <tr class="border-b border-outline-variant/30 text-on-surface-variant/80 font-bold">
+                                            <th class="py-1">Target</th>
+                                            <th class="py-1">Prediction & Action Required</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="sem-card-predictor-table-body" class="divide-y divide-outline-variant/10 text-on-surface font-semibold">
+                                        <!-- Predictions dynamically filled -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Extra Details (Holiday Impact & Progress bar) -->
+                    <div class="mt-4 pt-3 border-t border-outline-variant/20 grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <!-- Progress bar -->
+                        <div class="space-y-1.5">
+                            <div class="flex justify-between items-center text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">
+                                <span>Semester Progress</span>
+                                <span id="sem-progress-percent" class="text-primary font-extrabold">0%</span>
+                            </div>
+                            <div class="w-full bg-zinc-900 rounded-full h-2.5 overflow-hidden border border-outline-variant/30">
+                                <div id="sem-progress-bar" class="bg-primary h-full rounded-full transition-all duration-500" style="width: 0%"></div>
+                            </div>
+                            <div class="flex justify-between text-[9px] text-on-surface-variant font-medium">
+                                <span id="sem-progress-conducted">Conducted: 0 classes</span>
+                                <span id="sem-progress-total">Total: 0 classes</span>
+                            </div>
+                        </div>
+                        <!-- Holiday Impact Analysis text -->
+                        <div class="bg-surface-container-high/40 p-2.5 rounded-xl border border-outline-variant/30 flex flex-col justify-center">
+                            <p class="text-[9px] font-bold text-on-surface-variant uppercase tracking-wider mb-1 flex items-center gap-1">
+                                <span class="material-symbols-outlined text-[13px] text-primary">warning</span>
+                                Holiday & Exam Calendar Impact
+                            </p>
+                            <p id="sem-holiday-impact-text" class="text-[10.5px] text-on-surface font-semibold leading-relaxed">
+                                No holidays or exams scheduled this semester.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Top stat cards -->
+                <div class="grid grid-cols-4 gap-5">
+                    <div class="glass-card rounded-2xl p-5 flex items-center gap-5">
+                        <div class="relative w-[88px] h-[88px] flex-shrink-0">
+                            <svg class="w-full h-full" viewBox="0 0 100 100">
+                                <circle cx="50" cy="50" fill="transparent" r="40" stroke="#353534" stroke-width="8"/>
+                                <circle class="progress-ring__circle" cx="50" cy="50" fill="transparent" id="dashboard-progress-circle" r="40" stroke="#cdbdff" stroke-width="8" stroke-dasharray="251.2" stroke-dashoffset="251.2" stroke-linecap="round" style="filter:drop-shadow(0 0 8px rgba(205,189,255,0.5))"/>
+                            </svg>
+                            <div class="absolute inset-0 flex flex-col items-center justify-center">
+                                <span class="font-bold text-[19px] text-on-surface leading-none"><span id="dash-overall-percent">0</span><span class="text-primary text-[12px]">%</span></span>
+                            </div>
+                        </div>
+                        <div>
+                            <p class="text-[10px] text-on-surface-variant uppercase tracking-wider font-semibold mb-0.5">Overall</p>
+                            <p class="font-bold text-[16px] text-on-surface">Attendance</p>
+                            <p id="dash-target-goal" class="text-[12px] text-primary font-semibold mt-1.5">Target: 75%</p>
+                        </div>
+                    </div>
+                    <div class="glass-card rounded-2xl p-5 flex flex-col justify-between">
+                        <div class="w-8 h-8 rounded-lg bg-surface-container-highest flex items-center justify-center mb-3"><span class="material-symbols-outlined text-[17px] text-on-surface-variant">class</span></div>
+                        <div><p id="dash-total-classes" class="font-bold text-[28px] text-on-surface leading-none">0</p><p class="text-[12px] text-on-surface-variant mt-1">Total Classes</p></div>
+                    </div>
+                    <div class="glass-card rounded-2xl p-5 flex flex-col justify-between border-l-4 border-l-secondary">
+                        <div class="w-8 h-8 rounded-lg bg-secondary/10 flex items-center justify-center mb-3"><span class="material-symbols-outlined text-[17px] text-secondary">check_circle</span></div>
+                        <div><p id="dash-present-classes" class="font-bold text-[28px] text-secondary leading-none">0</p><p class="text-[12px] text-on-surface-variant mt-1">Present</p></div>
+                    </div>
+                    <div class="glass-card rounded-2xl p-5 flex flex-col justify-between border-l-4 border-l-error">
+                        <div class="w-8 h-8 rounded-lg bg-error/10 flex items-center justify-center mb-3"><span class="material-symbols-outlined text-[17px] text-error">cancel</span></div>
+                        <div><p id="dash-absent-classes" class="font-bold text-[28px] text-error leading-none">0</p><p class="text-[12px] text-on-surface-variant mt-1">Absent</p></div>
+                    </div>
+                </div>
+                <!-- Second row -->
+                <div class="grid grid-cols-3 gap-5">
+                    <div class="glass-card rounded-2xl p-6 col-span-2 relative overflow-hidden group">
+                        <div class="absolute right-0 top-0 opacity-[0.04] p-4"><span class="material-symbols-outlined text-[90px]">verified</span></div>
+                        <p class="text-[10px] text-on-surface-variant uppercase tracking-wider font-semibold mb-2">Safe Bunks Analysis</p>
+                        <h3 id="dash-safe-bunks-title" class="text-[24px] font-extrabold text-on-primary-container mb-1.5">Calculating...</h3>
+                        <p id="dash-safe-bunks-desc" class="text-[13px] text-on-surface-variant leading-relaxed mb-4">Analyzing your attendance history to calculate safety margin.</p>
+                        <div class="w-full bg-surface-container-highest h-2 rounded-full overflow-hidden">
+                            <div id="dash-safe-bunks-bar" class="h-full bg-secondary w-0 rounded-full transition-all duration-1000 ease-out shadow-[0_0_8px_rgba(64,229,108,0.4)]"></div>
+                        </div>
+                    </div>
+                    <div class="flex flex-col gap-4">
+                        <div class="glass-card rounded-2xl p-5 flex items-center gap-4 flex-1">
+                            <div id="dash-streak-icon-container" class="w-10 h-10 rounded-xl bg-secondary/10 text-secondary flex items-center justify-center flex-shrink-0"><span class="material-symbols-outlined text-[22px]">local_fire_department</span></div>
+                            <div><p class="text-[10px] text-on-surface-variant uppercase tracking-wider font-semibold">Streak</p><p id="dash-streak-count" class="font-bold text-[20px] text-on-surface mt-0.5">0 Days</p></div>
+                        </div>
+                        <div class="glass-card rounded-2xl p-5 flex items-center gap-4 flex-1">
+                            <div class="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center flex-shrink-0"><span class="material-symbols-outlined text-[22px]">trending_up</span></div>
+                            <div><p class="text-[10px] text-on-surface-variant uppercase tracking-wider font-semibold">Target Goal</p><p id="dash-target-goal-2" class="font-bold text-[20px] text-primary mt-0.5">75%</p></div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Next class card (full width) -->
+                <div class="glass-card rounded-2xl p-6 border-l-4 border-l-primary">
+                    <div class="flex items-center justify-between">
+                        <div class="flex-1">
+                            <div class="flex items-center gap-3 mb-2">
+                                <p class="text-[10px] text-primary uppercase tracking-widest font-semibold">Next Scheduled Class</p>
+                                <span id="dash-next-class-countdown" class="bg-primary/20 text-primary text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider">COMPLETED</span>
+                            </div>
+                            <h3 id="dash-next-class-name" class="font-bold text-[20px] text-on-surface">No Classes Today</h3>
+                            <div class="flex items-center gap-2 mt-1.5 text-on-surface-variant">
+                                <span class="material-symbols-outlined text-[16px]">schedule</span>
+                                <span id="dash-next-class-time" class="text-[14px]">Enjoy your day!</span>
+                            </div>
+                        </div>
+                        <button id="dash-mark-present-btn" class="hidden ml-6 px-6 py-3 bg-primary-container text-on-primary-container rounded-xl font-bold text-[14px] transition-all hover:shadow-[0_0_20px_rgba(124,77,255,0.4)] active:scale-95 flex items-center gap-2">
+                            <span class="material-symbols-outlined text-[18px]">done</span> Mark Present
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Bottom bento row: Subject Summary + Recent Logs + AI Insights -->
+                <div class="grid grid-cols-3 gap-5">
+                    <!-- Subject Wise Summary -->
+                    <div class="glass-card rounded-2xl p-5">
+                        <h3 class="font-semibold text-[11px] text-on-surface-variant uppercase tracking-wider mb-4 flex items-center gap-1.5">
+                            <span class="material-symbols-outlined text-[15px] text-secondary">bar_chart</span>
+                            Subject Summary
+                        </h3>
+                        <div id="dash-subjects-list" class="space-y-2.5 max-h-[200px] overflow-y-auto no-scrollbar"></div>
+                    </div>
+                    <!-- Recent Log History -->
+                    <div class="glass-card rounded-2xl p-5">
+                        <h3 class="font-semibold text-[11px] text-on-surface-variant uppercase tracking-wider mb-4 flex items-center gap-1.5">
+                            <span class="material-symbols-outlined text-[15px] text-primary">history</span>
+                            Recent Activity
+                        </h3>
+                        <div id="dash-recent-logs" class="relative border-l border-outline-variant/40 pl-4 ml-1 max-h-[200px] overflow-y-auto no-scrollbar space-y-0"></div>
+                    </div>
+                    <!-- AI Insights -->
+                    <div class="glass-card rounded-2xl p-5 relative overflow-hidden">
+                        <div class="absolute right-3 top-3 opacity-[0.04] pointer-events-none"><span class="material-symbols-outlined text-[80px]">insights</span></div>
+                        <h3 class="font-semibold text-[11px] text-on-surface-variant uppercase tracking-wider mb-4 flex items-center gap-1.5">
+                            <span class="material-symbols-outlined text-[15px] text-primary">auto_awesome</span>
+                            AI Insights
+                        </h3>
+                        <div id="dash-ai-insight-box"></div>
+                        <button onclick="triggerGreetingNotification()" class="mt-4 w-full py-2 bg-primary/10 border border-primary/20 text-primary hover:bg-primary/20 rounded-xl text-[11px] font-bold active:scale-95 transition-all flex items-center justify-center gap-1.5">
+                            <span class="material-symbols-outlined text-[13px]">refresh</span> Refresh Insight
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- DAILY TAB -->
+            <div id="tab-view-daily" class="tab-view hidden space-y-5">
+                <div class="flex items-end justify-between">
+                    <div>
+                        <p class="text-[11px] text-on-surface-variant uppercase tracking-widest font-semibold">Today's Schedule</p>
+                        <h2 id="daily-header-date" class="font-bold text-[26px] text-on-surface mt-0.5">Monday, Jul 4</h2>
+                    </div>
+                    <div class="text-right">
+                        <p id="daily-marked-ratio" class="font-semibold text-[14px] text-secondary">0/0 Marked</p>
+                        <div class="h-1.5 w-48 bg-surface-container-highest rounded-full overflow-hidden mt-1.5">
+                            <div id="daily-schedule-progress-bar" class="h-full bg-secondary w-0 transition-all duration-500 rounded-full shadow-[0_0_8px_rgba(64,229,108,0.3)]"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex flex-col md:flex-row gap-3 justify-between items-start md:items-center bg-surface-container-low/40 p-3.5 rounded-2xl border border-outline-variant/30">
+                    <div class="flex items-center gap-3 bg-zinc-900 border border-outline-variant/60 rounded-xl px-3 py-1.5 w-full md:w-80">
+                        <span class="material-symbols-outlined text-[18px] text-on-surface-variant">search</span>
+                        <input type="text" id="daily-search-input" oninput="filterDailyLogs()" placeholder="Search subject, faculty, status..." class="bg-transparent border-0 text-xs text-on-surface p-0 focus:ring-0 focus:outline-none w-full"/>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="text-[11px] font-bold text-on-surface-variant uppercase">View:</span>
+                        <select id="daily-status-filter" onchange="filterDailyLogs()" class="bg-zinc-900 border border-outline-variant rounded-xl text-xs text-on-surface px-2.5 py-1.5 focus:outline-none focus:border-primary">
+                            <option value="all">All Classes</option>
+                            <option value="marked">Marked Only</option>
+                            <option value="unmarked">Unmarked Only</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="flex gap-2 overflow-x-auto pb-1 no-scrollbar" id="daily-week-tabs"></div>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4" id="daily-classes-list-container"></div>
+            </div>
+
+            <!-- ANALYTICS TAB -->
+            <div id="tab-view-analytics" class="tab-view hidden space-y-6">
+                <!-- Bento Row -->
+                <div class="grid grid-cols-4 gap-5">
+                    <div class="glass-card rounded-2xl p-5">
+                        <span class="material-symbols-outlined text-secondary text-[22px]">check_circle</span>
+                        <p id="analytics-bunk-limit-insight" class="text-[22px] font-bold text-on-surface mt-3 mb-1">0 Bunks</p>
+                        <p class="text-[10px] text-on-surface-variant uppercase tracking-wider font-semibold">Safe Bunks</p>
+                    </div>
+                    <div class="glass-card rounded-2xl p-5">
+                        <span class="material-symbols-outlined text-primary text-[22px]">school</span>
+                        <p id="analytics-goal-diff-insight" class="text-[22px] font-bold text-on-surface mt-3 mb-1">On Track</p>
+                        <p class="text-[10px] text-on-surface-variant uppercase tracking-wider font-semibold">Goal Status</p>
+                    </div>
+                    <div class="glass-card rounded-2xl p-5 col-span-2 flex items-center gap-5">
+                        <div class="flex-1">
+                            <p class="text-[10px] text-on-surface-variant uppercase tracking-wider font-semibold mb-1">Weekly Trend</p>
+                            <p class="font-bold text-[22px] flex items-baseline gap-1">
+                                <span id="analytics-trend-percent" class="text-secondary">+0.0%</span>
+                                <span class="text-[12px] text-on-surface-variant font-normal">this month</span>
+                            </p>
+                        </div>
+                        <div class="h-16 flex-1" id="analytics-trend-svg-box"></div>
+                    </div>
+                </div>
+                <!-- New Analytics Visual Charts (Bar & Pie Charts) -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    <!-- Bar Chart for Subject Comparison -->
+                    <div class="glass-card rounded-2xl p-5">
+                        <div class="flex items-center justify-between mb-4">
+                            <h3 class="font-semibold text-[12px] text-on-surface-variant uppercase tracking-wider">Subject Comparison</h3>
+                            <span class="text-[10px] font-bold text-primary bg-primary/15 px-2.5 py-0.5 rounded-full border border-primary/20">BAR CHART</span>
+                        </div>
+                        <div id="analytics-bar-chart-container" class="h-48 flex items-end justify-around gap-2 pt-2 border-b border-outline-variant/30">
+                            <!-- Dynamically generated SVG Bar chart -->
+                        </div>
+                    </div>
+                    <!-- Pie Chart for Attendance Status Categories Breakdown -->
+                    <div class="glass-card rounded-2xl p-5 flex flex-col justify-between">
+                        <div class="flex items-center justify-between mb-2">
+                            <h3 class="font-semibold text-[12px] text-on-surface-variant uppercase tracking-wider">Attendance Categories</h3>
+                            <span class="text-[10px] font-bold text-secondary bg-secondary/15 px-2.5 py-0.5 rounded-full border border-secondary/20">PIE CHART</span>
+                        </div>
+                        <div class="flex items-center gap-4 flex-1">
+                            <div id="analytics-pie-chart-container" class="w-36 h-36 flex-shrink-0">
+                                <!-- Dynamically generated SVG Pie chart -->
+                            </div>
+                            <div id="analytics-pie-legend" class="flex-grow space-y-1 text-[11px] font-semibold">
+                                <!-- Legends dynamically filled -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Heatmap + Subject list -->
+                <div class="grid grid-cols-5 gap-5">
+                    <div class="glass-card rounded-2xl p-5 col-span-3">
+                        <div class="flex items-center justify-between mb-4">
+                            <h3 class="font-semibold text-[12px] text-on-surface-variant uppercase tracking-wider">Attendance Heatmap</h3>
+                            <span class="text-[10px] font-bold text-secondary bg-secondary/10 px-2.5 py-0.5 rounded-full border border-secondary/20">16 WEEKS</span>
+                        </div>
+
+                        <div class="overflow-x-auto no-scrollbar"><div class="flex gap-1" id="heatmap-grid-container"></div></div>
+                        <div class="flex items-center justify-between text-[10px] text-on-surface-variant mt-3">
+                            <span class="italic text-outline">Hover for density</span>
+                            <div class="flex items-center gap-1.5"><span>Less</span>
+                                <div class="w-3 h-3 rounded-sm bg-surface-container-highest"></div><div class="w-3 h-3 rounded-sm bg-secondary/20"></div>
+                                <div class="w-3 h-3 rounded-sm bg-secondary/40"></div><div class="w-3 h-3 rounded-sm bg-secondary/70"></div>
+                                <div class="w-3 h-3 rounded-sm bg-secondary"></div><span>More</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-span-2 space-y-3">
+                        <h3 class="font-semibold text-[12px] text-on-surface-variant uppercase tracking-wider">Subject Breakdown</h3>
+                        <div id="analytics-subjects-list" class="space-y-2.5"></div>
+                    </div>
+                </div>
+                <!-- AI Predictor -->
+                <div class="glass-card rounded-2xl p-6">
+                    <div class="flex items-center justify-between mb-5">
+                        <div>
+                            <h3 class="font-bold text-[16px] text-on-surface">AI Attendance Predictor</h3>
+                            <p class="text-[13px] text-on-surface-variant mt-0.5">Simulate future class decisions and see the impact.</p>
+                        </div>
+                        <span class="text-[10px] font-bold text-primary bg-primary/15 px-3 py-1 rounded-full border border-primary/20">FORECAST</span>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                        <div>
+                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-2">Subject</label>
+                            <select id="predict-subject-select" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface px-3 py-2.5 focus:border-primary focus:outline-none" onchange="updatePredictionForecast()">
+                                <option value="all">Overall Semester</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-2">If I attend next</label>
+                            <div class="flex items-center bg-zinc-900 border border-outline-variant rounded-xl px-3 gap-2">
+                                <input type="number" id="predict-attend-input" min="0" value="0" class="flex-1 bg-transparent border-0 text-[13px] text-on-surface py-2 focus:ring-0 focus:outline-none" oninput="updatePredictionForecast()"/>
+                                <span class="text-[9px] text-on-surface-variant font-bold">CLASSES</span>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-2">If I miss next</label>
+                            <div class="flex items-center bg-zinc-900 border border-outline-variant rounded-xl px-3 gap-2">
+                                <input type="number" id="predict-miss-input" min="0" value="0" class="flex-1 bg-transparent border-0 text-[13px] text-on-surface py-2 focus:ring-0 focus:outline-none" oninput="updatePredictionForecast()"/>
+                                <span class="text-[9px] text-on-surface-variant font-bold">CLASSES</span>
+                            </div>
+                        </div>
+                        <div class="bg-surface-container-lowest border border-outline-variant/30 rounded-xl p-3 flex items-center justify-between">
+                            <div>
+                                <p class="text-[9px] text-on-surface-variant uppercase tracking-wider font-semibold">Predicted %</p>
+                                <p id="prediction-result-percent" class="text-[20px] font-bold text-primary mt-0.5">--</p>
+                            </div>
+                            <span id="prediction-result-status" class="px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-surface-container-highest text-on-surface-variant">No Input</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ------------------------------------------------------------- -->
+            <!-- REPORTS TAB (NEW) -->
+            <!-- ------------------------------------------------------------- -->
+            <div id="tab-view-reports" class="tab-view hidden space-y-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h2 class="font-bold text-[20px] text-on-surface">Attendance Reports</h2>
+                        <p class="text-[13px] text-on-surface-variant mt-0.5">Generate, preview and download your attendance data</p>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="downloadReportPDF()" id="btn-download-pdf" class="flex items-center gap-2 px-5 py-2.5 bg-error/15 border border-error/20 text-error rounded-xl font-semibold text-sm hover:bg-error/25 transition-colors active:scale-95">
+                            <span class="material-symbols-outlined text-[18px]">picture_as_pdf</span> Download PDF
+                        </button>
+                        <button onclick="downloadReportCSV()" id="btn-download-csv" class="flex items-center gap-2 px-5 py-2.5 bg-secondary/15 border border-secondary/20 text-secondary rounded-xl font-semibold text-sm hover:bg-secondary/25 transition-colors active:scale-95">
+                            <span class="material-symbols-outlined text-[18px]">table_chart</span> Download CSV
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Report Config -->
+                <div class="glass-card rounded-2xl p-5">
+                    <div class="flex items-center gap-3 mb-4">
+                        <span class="material-symbols-outlined text-primary text-[20px]">tune</span>
+                        <h3 class="font-bold text-[14px] text-on-surface">Report Configuration</h3>
+                    </div>
+                    <div class="grid grid-cols-4 gap-4">
+                        <div>
+                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Period</label>
+                            <select id="report-period-select" onchange="onReportPeriodChange()" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none">
+                                <option value="weekly">This Week</option>
+                                <option value="monthly" selected>This Month</option>
+                                <option value="semester">Semester</option>
+                                <option value="custom">Custom Range</option>
+                            </select>
+                        </div>
+                        <div id="report-custom-start-wrap" class="hidden">
+                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Start Date</label>
+                            <input type="date" id="report-custom-start" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none"/>
+                        </div>
+                        <div id="report-custom-end-wrap" class="hidden">
+                            <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">End Date</label>
+                            <input type="date" id="report-custom-end" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none"/>
+                        </div>
+                        <div class="flex items-end">
+                            <button onclick="loadReportPreview()" class="w-full py-2.5 bg-primary text-on-primary rounded-xl font-bold text-sm active:scale-95 transition-all hover:bg-primary/90 flex items-center justify-center gap-2">
+                                <span class="material-symbols-outlined text-[18px]">refresh</span> Generate Preview
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Report Preview -->
+                <div id="report-preview-container" class="space-y-5">
+                    <!-- Preview cards rendered by JS -->
+                    <div class="glass-card rounded-2xl p-6 text-center">
+                        <span class="material-symbols-outlined text-[48px] text-on-surface-variant/30">summarize</span>
+                        <p class="text-on-surface-variant text-[13px] mt-2">Click <strong>"Generate Preview"</strong> to see your report data</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SCHEDULE TAB -->
+            <div id="tab-view-schedule" class="tab-view hidden space-y-5">
+                <div class="flex gap-1 p-1 bg-surface-container rounded-2xl border border-outline-variant w-fit">
+                    <button id="schedule-subtab-timetable" onclick="toggleScheduleSubTab('timetable')" class="px-5 py-2 rounded-xl font-bold transition-all bg-surface-container-high text-on-surface shadow-sm text-sm">Timetable</button>
+                    <button id="schedule-subtab-calendar" onclick="toggleScheduleSubTab('calendar')" class="px-5 py-2 rounded-xl font-bold transition-all text-on-surface-variant hover:text-on-surface text-sm">Calendar</button>
+                    <button id="schedule-subtab-leaves" onclick="toggleScheduleSubTab('leaves')" class="px-5 py-2 rounded-xl font-bold transition-all text-on-surface-variant hover:text-on-surface text-sm">Leave Plans</button>
+                </div>
+                <!-- Timetable -->
+                <div id="schedule-view-timetable" class="space-y-5">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <h2 class="font-bold text-[20px] text-on-surface">Weekly Timetable</h2>
+                            <p class="text-[13px] text-on-surface-variant mt-0.5">Configure classes for automated attendance tracking</p>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <!-- Layout mode switcher -->
+                            <div class="flex p-0.5 bg-surface-container rounded-xl border border-outline-variant/60">
+                                <button id="timetable-view-list-btn" onclick="toggleTimetableViewMode('list')" class="px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all bg-surface-container-high text-on-surface shadow-sm">List</button>
+                                <button id="timetable-view-periods-btn" onclick="toggleTimetableViewMode('periods')" class="px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all text-on-surface-variant hover:text-on-surface">Period Grid</button>
+                            </div>
+                            <button onclick="toggleModal('ocrModal')" class="flex items-center gap-2 px-4 py-2.5 bg-primary/10 border border-primary/20 text-primary rounded-xl font-semibold text-sm hover:bg-primary/20 transition-colors">
+                                <span class="material-symbols-outlined text-[18px]">center_focus_strong</span> AI Scan
+                            </button>
+                            <button onclick="openAddClassModal()" class="flex items-center gap-2 px-4 py-2.5 bg-primary text-on-primary rounded-xl font-semibold text-sm hover:bg-primary/80 transition-colors">
+                                <span class="material-symbols-outlined text-[18px]">add</span> Add Class
+                            </button>
+                        </div>
+                    </div>
+                    <div class="flex gap-2 overflow-x-auto no-scrollbar" id="timetable-day-selector"></div>
+                    <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4" id="timetable-classes-list"></div>
+                </div>
+                <!-- Calendar -->
+                <div id="schedule-view-calendar" class="hidden">
+                    <div class="grid grid-cols-5 gap-6">
+                        <div class="col-span-3 space-y-4">
+                            <div class="flex justify-between items-center bg-surface-container-low/40 p-3 rounded-2xl border border-outline-variant/30">
+                                <div><h2 id="calendar-month-title" class="font-bold text-[18px] text-on-surface">September 2024</h2><p class="text-[10px] text-on-surface-variant uppercase font-semibold mt-0.5">Attendance Calendar</p></div>
+                                <div class="flex gap-2">
+                                    <button onclick="changeCalendarMonth(-1)" class="p-2 rounded-xl bg-surface-container border border-outline-variant hover:bg-surface-container-high transition-colors"><span class="material-symbols-outlined text-[18px] block">chevron_left</span></button>
+                                    <button onclick="changeCalendarMonth(1)" class="p-2 rounded-xl bg-surface-container border border-outline-variant hover:bg-surface-container-high transition-colors"><span class="material-symbols-outlined text-[18px] block">chevron_right</span></button>
+                                </div>
+                            </div>
+                            <div class="glass-card rounded-2xl p-5">
+                                <div class="calendar-grid text-center font-bold text-[11px] text-outline/80 border-b border-outline-variant/20 pb-2 mb-3">
+                                    <div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div>
+                                </div>
+                                <div class="calendar-grid gap-y-1.5" id="calendar-days-grid"></div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div class="glass-card rounded-2xl p-4 flex items-center gap-3">
+                                    <span class="material-symbols-outlined text-secondary text-[20px]">check_circle</span>
+                                    <div><p id="calendar-month-present-rate" class="text-[20px] font-bold text-secondary">0%</p><p class="text-[10px] text-on-surface-variant uppercase tracking-wider font-semibold">Month Rate</p></div>
+                                </div>
+                                <div class="glass-card rounded-2xl p-4 flex items-center gap-3">
+                                    <span class="material-symbols-outlined text-error text-[20px]">cancel</span>
+                                    <div><p id="calendar-month-absent-count" class="text-[20px] font-bold text-error">0</p><p class="text-[10px] text-on-surface-variant uppercase tracking-wider font-semibold">Absences</p></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-span-2">
+                            <div class="glass-card rounded-2xl p-5 sticky top-0">
+                                <div class="flex items-center justify-between border-b border-outline-variant/20 pb-3 mb-3">
+                                    <h3 id="calendar-selected-date-str" class="font-bold text-[15px] text-on-surface">Select a date</h3>
+                                    <span id="calendar-selected-day-pill" class="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">Day</span>
+                                </div>
+                                <div id="calendar-selected-day-classes" class="space-y-2"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Leave Plans (NEW) -->
+                <div id="schedule-view-leaves" class="hidden space-y-5">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <h2 class="font-bold text-[20px] text-on-surface">Leave Plans</h2>
+                            <p class="text-[13px] text-on-surface-variant mt-0.5">Plan and track your planned absences</p>
+                        </div>
+                        <button onclick="toggleModal('leavePlanModal')" class="flex items-center gap-2 px-4 py-2.5 bg-primary text-on-primary rounded-xl font-semibold text-sm hover:bg-primary/80 transition-colors active:scale-95">
+                            <span class="material-symbols-outlined text-[18px]">add</span> Add Leave Plan
+                        </button>
+                    </div>
+                    <div id="leave-plans-list" class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        <div class="text-center py-10 glass-card rounded-2xl p-6">
+                            <span class="material-symbols-outlined text-[48px] text-on-surface-variant/30">event_available</span>
+                            <p class="text-on-surface-variant text-[13px] mt-2">No leave plans created yet</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div> <!-- end main area -->
+
+    <!-- MOBILE BOTTOM NAV -->
+    <nav id="mobile-bottom-nav" class="hidden fixed bottom-0 left-0 right-0 z-50 bg-surface-container-low/95 backdrop-blur-xl border-t border-outline-variant/30 px-2 py-1.5 items-center justify-around">
+        <button onclick="tabNavigation('dashboard')" class="mobile-nav-btn flex flex-col items-center gap-0.5 p-2 rounded-xl text-on-surface-variant" data-tab="dashboard">
+            <span class="material-symbols-outlined text-[22px]">dashboard</span>
+            <span class="text-[9px] font-bold">Home</span>
+        </button>
+        <button onclick="tabNavigation('daily')" class="mobile-nav-btn flex flex-col items-center gap-0.5 p-2 rounded-xl text-on-surface-variant" data-tab="daily">
+            <span class="material-symbols-outlined text-[22px]">fact_check</span>
+            <span class="text-[9px] font-bold">Daily</span>
+        </button>
+        <button onclick="tabNavigation('analytics')" class="mobile-nav-btn flex flex-col items-center gap-0.5 p-2 rounded-xl text-on-surface-variant" data-tab="analytics">
+            <span class="material-symbols-outlined text-[22px]">analytics</span>
+            <span class="text-[9px] font-bold">Stats</span>
+        </button>
+        <button onclick="tabNavigation('reports')" class="mobile-nav-btn flex flex-col items-center gap-0.5 p-2 rounded-xl text-on-surface-variant" data-tab="reports">
+            <span class="material-symbols-outlined text-[22px]">description</span>
+            <span class="text-[9px] font-bold">Reports</span>
+        </button>
+        <button onclick="tabNavigation('schedule')" class="mobile-nav-btn flex flex-col items-center gap-0.5 p-2 rounded-xl text-on-surface-variant" data-tab="schedule">
+            <span class="material-symbols-outlined text-[22px]">calendar_today</span>
+            <span class="text-[9px] font-bold">Schedule</span>
+        </button>
+    </nav>
+
+    <!-- MODALS -->
+    <!-- Onboarding Wizard Modal -->
+    <div class="fixed inset-0 z-[60] hidden" id="ocrModal">
+        <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" onclick="closeOcrModal()"></div>
+        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-xl glass-card rounded-2xl p-6 shadow-2xl border border-outline-variant/50 transition-all duration-300">
+            <div class="flex justify-between items-start mb-4 border-b border-outline-variant/20 pb-3">
+                <div>
+                    <h2 class="font-bold text-[18px] text-on-surface" id="ob-modal-title">Academic Onboarding</h2>
+                    <p class="text-[12px] text-on-surface-variant mt-0.5">Let's set up your semester and timetable logs automatically.</p>
+                </div>
+                <button class="text-on-surface-variant hover:text-on-surface p-1.5 rounded-xl hover:bg-surface-container-high" onclick="closeOcrModal()"><span class="material-symbols-outlined text-[20px]">close</span></button>
+            </div>
+            
+            <!-- Stepper Indicator -->
+            <div class="flex items-center justify-between mb-5 px-2 text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">
+                <span id="step-dot-1" class="text-primary flex items-center gap-1"><span class="w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center text-[10px]">1</span> Profile</span>
+                <span class="h-0.5 bg-outline-variant/30 flex-1 mx-2"></span>
+                <span id="step-dot-2" class="flex items-center gap-1"><span class="w-5 h-5 rounded-full bg-surface-container-highest flex items-center justify-center text-[10px]">2</span> Timetable</span>
+                <span class="h-0.5 bg-outline-variant/30 flex-1 mx-2"></span>
+                <span id="step-dot-3" class="flex items-center gap-1"><span class="w-5 h-5 rounded-full bg-surface-container-highest flex items-center justify-center text-[10px]">3</span> Calendar</span>
+                <span class="h-0.5 bg-outline-variant/30 flex-1 mx-2"></span>
+                <span id="step-dot-4" class="flex items-center gap-1"><span class="w-5 h-5 rounded-full bg-surface-container-highest flex items-center justify-center text-[10px]">4</span> Verify</span>
+            </div>
+
+            <!-- Wizard Step 1: Academic Profile -->
+            <div id="ob-step-1" class="space-y-4">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">College Name</label>
+                        <input type="text" id="ob-college" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface p-2.5 focus:border-primary focus:outline-none" placeholder="e.g. Engineering College" required/>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Branch</label>
+                        <input type="text" id="ob-branch" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface p-2.5 focus:border-primary focus:outline-none" placeholder="e.g. Computer Science" required/>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Current Semester</label>
+                        <select id="ob-semester" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface p-2.5 focus:border-primary focus:outline-none">
+                            <option value="Semester 1">Semester 1</option>
+                            <option value="Semester 2">Semester 2</option>
+                            <option value="Semester 3">Semester 3</option>
+                            <option value="Semester 4">Semester 4</option>
+                            <option value="Semester 5">Semester 5</option>
+                            <option value="Semester 6">Semester 6</option>
+                            <option value="Semester 7">Semester 7</option>
+                            <option value="Semester 8">Semester 8</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Target Goal (%)</label>
+                        <input type="number" id="ob-goal" min="50" max="99" value="75" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface p-2.5 focus:border-primary focus:outline-none" required/>
+                    </div>
+                </div>
+                <button onclick="goToOnboardingStep(2)" class="w-full py-2.5 bg-primary text-on-primary rounded-xl font-bold text-sm hover:bg-primary/95 transition-all flex items-center justify-center gap-2 shadow-[0_0_12px_rgba(124,77,255,0.3)]">
+                    Next: Upload Timetable <span class="material-symbols-outlined text-[16px]">arrow_forward</span>
+                </button>
+            </div>
+
+            <!-- Wizard Step 2: Upload Timetable -->
+            <div id="ob-step-2" class="hidden space-y-4">
+                <div id="ob-tt-dropzone" ondragover="event.preventDefault(); this.classList.add('border-primary', 'bg-primary/5')" ondragleave="this.classList.remove('border-primary', 'bg-primary/5')" ondrop="handleObTtDrop(event)" onclick="document.getElementById('ob-tt-input').click()" class="border-2 border-dashed border-outline-variant hover:border-primary hover:bg-primary/5 transition-all rounded-2xl p-6 text-center cursor-pointer flex flex-col items-center justify-center gap-2 group">
+                    <input type="file" id="ob-tt-input" onchange="handleObTtSelect(event)" accept="image/*,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="hidden"/>
+                    <span class="material-symbols-outlined text-[36px] text-primary group-hover:scale-110 transition-transform">table_chart</span>
+                    <p class="text-[13px] font-bold text-on-surface">Drag & drop your class timetable file</p>
+                    <p class="text-[11px] text-on-surface-variant">Supports PDF, Image, or Excel files</p>
+                </div>
+                
+                <div id="ob-tt-status" class="hidden p-3 rounded-xl bg-surface-container border border-outline-variant flex items-center justify-between">
+                    <div class="flex items-center gap-2 min-w-0">
+                        <span class="material-symbols-outlined text-primary text-[20px]">description</span>
+                        <div class="min-w-0">
+                            <p class="text-[12px] font-bold text-on-surface truncate" id="ob-tt-filename">-</p>
+                            <p class="text-[10px] text-on-surface-variant" id="ob-tt-filesize">0 KB</p>
+                        </div>
+                    </div>
+                    <span id="ob-tt-badge" class="px-2 py-0.5 bg-surface-container-highest text-[9px] font-bold rounded">Ready</span>
+                </div>
+
+                <div class="flex gap-3">
+                    <button onclick="goToOnboardingStep(1)" class="flex-1 py-2.5 bg-surface-container-high text-on-surface rounded-xl font-bold text-sm hover:bg-surface-container-highest transition-all flex items-center justify-center gap-1.5">
+                        <span class="material-symbols-outlined text-[16px]">arrow_back</span> Back
+                    </button>
+                    <button id="ob-tt-scan-btn" onclick="startTimetableScanning()" class="flex-1 py-2.5 bg-primary text-on-primary rounded-xl font-bold text-sm hover:bg-primary/95 transition-all flex items-center justify-center gap-2 shadow-[0_0_12px_rgba(124,77,255,0.3)] disabled:opacity-50" disabled>
+                        Scan & Next: Upload Calendar <span class="material-symbols-outlined text-[16px]">arrow_forward</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Wizard Step 3: Upload Academic Calendar -->
+            <div id="ob-step-3" class="hidden space-y-4">
+                <div id="ob-cal-dropzone" ondragover="event.preventDefault(); this.classList.add('border-primary', 'bg-primary/5')" ondragleave="this.classList.remove('border-primary', 'bg-primary/5')" ondrop="handleObCalDrop(event)" onclick="document.getElementById('ob-cal-input').click()" class="border-2 border-dashed border-outline-variant hover:border-primary hover:bg-primary/5 transition-all rounded-2xl p-6 text-center cursor-pointer flex flex-col items-center justify-center gap-2 group">
+                    <input type="file" id="ob-cal-input" onchange="handleObCalSelect(event)" accept="image/*,application/pdf" class="hidden"/>
+                    <span class="material-symbols-outlined text-[36px] text-primary group-hover:scale-110 transition-transform">calendar_month</span>
+                    <p class="text-[13px] font-bold text-on-surface">Drag & drop academic calendar</p>
+                    <p class="text-[11px] text-on-surface-variant">Supports PDF or Image files</p>
+                </div>
+                
+                <div id="ob-cal-status" class="hidden p-3 rounded-xl bg-surface-container border border-outline-variant flex items-center justify-between">
+                    <div class="flex items-center gap-2 min-w-0">
+                        <span class="material-symbols-outlined text-primary text-[20px]">calendar_today</span>
+                        <div class="min-w-0">
+                            <p class="text-[12px] font-bold text-on-surface truncate" id="ob-cal-filename">-</p>
+                            <p class="text-[10px] text-on-surface-variant" id="ob-cal-filesize">0 KB</p>
+                        </div>
+                    </div>
+                    <span id="ob-cal-badge" class="px-2 py-0.5 bg-surface-container-highest text-[9px] font-bold rounded">Ready</span>
+                </div>
+
+                <div class="flex gap-3">
+                    <button onclick="goToOnboardingStep(2)" class="flex-1 py-2.5 bg-surface-container-high text-on-surface rounded-xl font-bold text-sm hover:bg-surface-container-highest transition-all flex items-center justify-center gap-1.5">
+                        <span class="material-symbols-outlined text-[16px]">arrow_back</span> Back
+                    </button>
+                    <button id="ob-cal-scan-btn" onclick="startCalendarScanning()" class="flex-1 py-2.5 bg-primary text-on-primary rounded-xl font-bold text-sm hover:bg-primary/95 transition-all flex items-center justify-center gap-2 shadow-[0_0_12px_rgba(124,77,255,0.3)] disabled:opacity-50" disabled>
+                        Scan & Next: Verification <span class="material-symbols-outlined text-[16px]">arrow_forward</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Wizard Step 4: Verification Screen -->
+            <div id="ob-step-4" class="hidden space-y-4">
+                <div class="p-3 bg-surface-container rounded-xl border border-outline-variant/40 space-y-2">
+                    <p class="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">AI Extracted Semester Metrics</p>
+                    
+                    <div class="grid grid-cols-2 gap-3">
+                        <div class="bg-surface-container-low p-2.5 rounded-lg border border-outline-variant/20 flex flex-col justify-center">
+                            <p class="text-[9px] text-on-surface-variant font-bold uppercase tracking-wider mb-1">Semester Start</p>
+                            <input type="date" id="ob-verify-start" onchange="onOcrDatesChange()" class="bg-zinc-900 border border-outline-variant rounded-lg text-[10px] text-on-surface px-2 py-1 focus:outline-none"/>
+                        </div>
+                        <div class="bg-surface-container-low p-2.5 rounded-lg border border-outline-variant/20 flex flex-col justify-center">
+                            <p class="text-[9px] text-on-surface-variant font-bold uppercase tracking-wider mb-1">Semester End</p>
+                            <input type="date" id="ob-verify-end" onchange="onOcrDatesChange()" class="bg-zinc-900 border border-outline-variant rounded-lg text-[10px] text-on-surface px-2 py-1 focus:outline-none"/>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 gap-3">
+                        <div class="bg-surface-container-low p-2.5 rounded-lg border border-outline-variant/20 flex items-center justify-between">
+                            <p class="text-[9px] text-on-surface-variant font-bold uppercase tracking-wider">Calculated Working Days</p>
+                            <p class="text-[12px] font-extrabold text-secondary"><span id="ob-verify-working-days">0</span> Days</p>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-3 gap-2 text-center pt-1">
+                        <div class="bg-surface-container-low p-2 rounded-lg border border-outline-variant/20">
+                            <p class="text-[9px] text-on-surface-variant font-bold uppercase tracking-wider leading-none">Holidays</p>
+                            <p id="ob-verify-holidays" class="font-extrabold text-[12px] text-on-surface mt-1">0</p>
+                        </div>
+                        <div class="bg-surface-container-low p-2 rounded-lg border border-outline-variant/20">
+                            <p class="text-[9px] text-on-surface-variant font-bold uppercase tracking-wider leading-none">Internal Exams</p>
+                            <p id="ob-verify-mid-exams" class="font-extrabold text-[12px] text-on-surface mt-1">0</p>
+                        </div>
+                        <div class="bg-surface-container-low p-2 rounded-lg border border-outline-variant/20">
+                            <p class="text-[9px] text-on-surface-variant font-bold uppercase tracking-wider leading-none">Semester Exams</p>
+                            <p id="ob-verify-final-exams" class="font-extrabold text-[12px] text-on-surface mt-1">0</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="border border-outline-variant/60 rounded-xl p-3 bg-surface-container-low max-h-[120px] overflow-y-auto no-scrollbar">
+                    <p class="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-2">Detected Subjects Schedule</p>
+                    <div id="ob-verify-subjects-list" class="divide-y divide-outline-variant/10 text-[10px] text-on-surface font-semibold space-y-1">
+                        <!-- Filled dynamically -->
+                    </div>
+                </div>
+
+                <div class="flex gap-3">
+                    <button onclick="goToOnboardingStep(3)" class="flex-1 py-2.5 bg-surface-container-high text-on-surface rounded-xl font-bold text-sm hover:bg-surface-container-highest transition-all flex items-center justify-center gap-1.5">
+                        <span class="material-symbols-outlined text-[16px]">arrow_back</span> Back
+                    </button>
+                    <button id="ob-save-btn" onclick="saveOnboardingWizardData()" class="flex-1 py-2.5 bg-primary text-on-primary rounded-xl font-bold text-sm hover:bg-primary/95 transition-all flex items-center justify-center gap-2 shadow-[0_0_12px_rgba(124,77,255,0.3)]">
+                        <span class="material-symbols-outlined text-[17px]">verified</span> Start Tracking
+                    </button>
+                </div>
+            </div>
+            
+            <div id="ocr-scanning-loader" class="hidden mt-4 p-4 rounded-xl bg-primary/10 border border-primary/20 flex items-center gap-3">
+                <div class="w-6 h-6 rounded-full border-4 border-primary border-t-transparent animate-spin flex-shrink-0"></div>
+                <span class="text-[13px] font-bold text-primary animate-pulse" id="ocr-loader-text">Analyzing your timetable schedule...</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Class Modal -->
+    <div class="fixed inset-0 z-[60] hidden" id="addClassModal">
+        <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" onclick="toggleModal('addClassModal')"></div>
+        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md glass-card rounded-2xl p-6 shadow-2xl border border-outline-variant/50 max-h-[90vh] overflow-y-auto no-scrollbar">
+            <div class="flex justify-between items-start mb-5">
+                <h2 id="class-modal-title" class="font-bold text-[18px] text-on-surface">Add New Class</h2>
+                <button class="text-on-surface-variant hover:text-on-surface p-1.5 rounded-xl hover:bg-surface-container-high" onclick="toggleModal('addClassModal')"><span class="material-symbols-outlined text-[20px]">close</span></button>
+            </div>
+            <form id="add-class-form" onsubmit="saveCustomClass(event)" class="space-y-4">
+                <input type="hidden" id="edit-class-index" value="-1"/>
+                <div class="grid grid-cols-2 gap-3">
+                    <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Day</label>
+                        <select id="form-class-day" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none">
+                            <option value="Mon">Mon</option><option value="Tue">Tue</option><option value="Wed">Wed</option>
+                            <option value="Thu">Thu</option><option value="Fri">Fri</option><option value="Sat">Sat</option>
+                        </select></div>
+                    <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Subject</label><input type="text" id="form-class-subject" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none" placeholder="e.g. Algorithms" required/></div>
+                </div>
+                <div>
+                    <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Period Slot</label>
+                    <select id="form-class-period-select" onchange="onClassPeriodSelectChange()" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none">
+                        <option value="custom" selected>Custom Time</option>
+                        <option value="P1">Period 1 (09:00 - 10:00)</option>
+                        <option value="P2">Period 2 (10:00 - 11:00)</option>
+                        <option value="P3">Period 3 (11:00 - 12:00)</option>
+                        <option value="Lunch">Lunch Break (12:00 - 13:00)</option>
+                        <option value="P4">Period 4 (13:00 - 14:00)</option>
+                        <option value="P5">Period 5 (14:00 - 15:00)</option>
+                        <option value="P6">Period 6 (15:00 - 16:00)</option>
+                        <option value="P7">Period 7 (16:00 - 17:00)</option>
+                    </select>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Start Time</label><input type="time" id="form-class-start" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none" required/></div>
+                    <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">End Time</label><input type="time" id="form-class-end" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none" required/></div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Room</label><input type="text" id="form-class-room" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none" placeholder="Lab 3"/></div>
+                    <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Professor</label><input type="text" id="form-class-prof" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none" placeholder="Dr. Turing"/></div>
+                </div>
+                <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Type</label>
+                    <select id="form-class-type" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none">
+                        <option value="Lecture">Lecture</option><option value="Practical">Practical</option><option value="Hybrid">Hybrid</option>
+                    </select></div>
+                <button type="submit" class="w-full py-3 bg-primary text-on-primary rounded-xl font-bold text-sm active:scale-95 transition-all hover:bg-primary/90">Save Class</button>
+            </form>
+        </div>
+    </div>
+       <div class="fixed inset-0 z-[60] hidden" id="profileModal">
+        <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" onclick="toggleModal('profileModal')"></div>
+        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg glass-card rounded-2xl shadow-2xl border border-outline-variant/50 max-h-[90vh] overflow-y-auto no-scrollbar">
+            <div class="p-6">
+                <div class="flex justify-between items-start mb-5">
+                    <div><h2 class="font-bold text-[18px] text-on-surface">Profile &amp; Settings</h2><p class="text-[13px] text-on-surface-variant mt-0.5">Update your profile and account preferences</p></div>
+                    <button aria-label="Close profile modal" class="text-on-surface-variant hover:text-on-surface p-1.5 rounded-xl hover:bg-surface-container-high" onclick="toggleModal('profileModal')"><span class="material-symbols-outlined text-[20px]">close</span></button>
+                </div>
+                <form id="profile-form" onsubmit="saveProfileSettings(event)" class="space-y-4">
+                    <!-- Profile Photo Selection -->
+                    <div class="flex items-center gap-4 mb-4 bg-surface-container-high/30 p-3 rounded-2xl border border-outline-variant/30">
+                        <div class="relative group cursor-pointer" onclick="document.getElementById('form-profile-photo-input').click()">
+                            <img id="form-profile-photo-img" class="w-14 h-14 rounded-full object-cover border border-outline-variant bg-surface-container-high" src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=200&auto=format&fit=crop" alt="Profile Photo"/>
+                            <div class="absolute inset-0 bg-black/60 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                <span class="material-symbols-outlined text-white text-[16px]">photo_camera</span>
+                            </div>
+                        </div>
+                        <div class="flex-1">
+                            <p class="font-bold text-xs text-on-surface">Profile Photo</p>
+                            <p class="text-[9px] text-on-surface-variant mt-0.5 uppercase tracking-wider">Tap image to upload new</p>
+                            <input type="file" id="form-profile-photo-input" class="hidden" accept="image/*" onchange="handleProfilePhotoUpload(event)"/>
+                        </div>
+                    </div>
+                    <!-- Row 1: Name -->
+                    <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Full Name</label><input aria-label="Full name" type="text" id="form-profile-name" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-3 focus:border-primary focus:outline-none" required/></div>
+                    <!-- Row 2: Roll Number + Register Number -->
+                    <div class="grid grid-cols-2 gap-3">
+                        <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Roll Number</label><input aria-label="Roll number" type="text" id="form-profile-roll" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-3 focus:border-primary focus:outline-none" placeholder="e.g. 21CS001"/></div>
+                        <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Register Number</label><input aria-label="Register number" type="text" id="form-profile-register-num" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-3 focus:border-primary focus:outline-none" placeholder="e.g. 123456789"/></div>
+                    </div>
+                    <!-- Row 3: Year + Section -->
+                    <div class="grid grid-cols-2 gap-3">
+                        <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Year</label><input aria-label="Academic year" type="text" id="form-profile-year" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-3 focus:border-primary focus:outline-none" placeholder="e.g. 2nd Year"/></div>
+                        <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Section</label><input aria-label="Section" type="text" id="form-profile-section" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-3 focus:border-primary focus:outline-none" placeholder="e.g. A"/></div>
+                    </div>
+                    <!-- Row 4: Branch + College -->
+                    <div class="grid grid-cols-2 gap-3">
+                        <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Branch / Department</label><input aria-label="Branch" type="text" id="form-profile-branch" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-3 focus:border-primary focus:outline-none" placeholder="e.g. CS"/></div>
+                        <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">College Name</label><input aria-label="College name" type="text" id="form-profile-college" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-3 focus:border-primary focus:outline-none" placeholder="Vishnu Institute of Tech"/></div>
+                    </div>
+                    <!-- Row 5: University -->
+                    <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">University Name</label><input aria-label="University name" type="text" id="form-profile-university" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-3 focus:border-primary focus:outline-none" placeholder="e.g. JNTUK"/></div>
+                    <!-- Row 6: Semester + Target -->
+                    <div class="grid grid-cols-2 gap-3">
+                        <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Academic Term</label>
+                            <select aria-label="Academic term" id="form-profile-term" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-3 focus:border-primary focus:outline-none">
+                                <option value="Semester 1 (Autumn)">Semester 1 (Autumn)</option><option value="Semester 2 (Spring)">Semester 2 (Spring)</option>
+                                <option value="Semester 3 (Autumn)">Semester 3 (Autumn)</option><option value="Semester 4 (Spring)">Semester 4 (Spring)</option>
+                                <option value="Semester 5 (Autumn)">Semester 5 (Autumn)</option><option value="Semester 6 (Spring)">Semester 6 (Spring)</option>
+                                <option value="Semester 7 (Autumn)">Semester 7 (Autumn)</option><option value="Semester 8 (Spring)">Semester 8 (Spring)</option>
+                            </select></div>
+                        <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Target Attendance (%)</label><input aria-label="Target attendance percentage" type="number" min="50" max="99" id="form-profile-target" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-3 focus:border-primary focus:outline-none" required/></div>
+                    </div>
+                    
+                    <!-- Preferences sub-panel -->
+                    <div class="bg-surface-container-high/30 p-3.5 rounded-2xl border border-outline-variant/30 space-y-3">
+                        <p class="text-[9px] font-bold text-primary uppercase tracking-wider">App Preferences & Security</p>
+                        
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-[12px] font-bold text-on-surface">PIN Lock Security</p>
+                                <p class="text-[9px] text-on-surface-variant">Require a 4-digit code to open the app</p>
+                            </div>
+                            <input type="checkbox" id="form-profile-pin-enabled" class="rounded border-outline-variant bg-zinc-900 text-primary focus:ring-primary w-4.5 h-4.5"/>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-[12px] font-bold text-on-surface">Security PIN Code</p>
+                                <p class="text-[9px] text-on-surface-variant">Set your 4-digit secure access PIN</p>
+                            </div>
+                            <input type="password" maxlength="4" placeholder="1234" id="form-profile-pin-code" class="w-20 bg-zinc-900 border border-outline-variant rounded-xl text-center text-xs text-on-surface px-2 py-1 focus:outline-none focus:border-primary"/>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-[12px] font-bold text-on-surface">Color Palette Accent</p>
+                                <p class="text-[9px] text-on-surface-variant">Personalize the application main accent</p>
+                            </div>
+                            <select id="form-profile-accent" class="bg-zinc-900 border border-outline-variant rounded-xl text-xs text-on-surface px-2 py-1 focus:outline-none">
+                                <option value="purple">Vibrant Purple</option>
+                                <option value="green">Emerald Green</option>
+                                <option value="amber">Warm Amber</option>
+                                <option value="cyan">Neon Cyan</option>
+                            </select>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-[12px] font-bold text-on-surface">Theme Mode</p>
+                                <p class="text-[9px] text-on-surface-variant">Choose Dark Mode or Light Mode</p>
+                            </div>
+                            <select id="form-profile-theme" class="bg-zinc-900 border border-outline-variant rounded-xl text-xs text-on-surface px-2 py-1 focus:outline-none">
+                                <option value="dark">Dark Mode</option>
+                                <option value="light">Light Mode</option>
+                            </select>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-[12px] font-bold text-on-surface">Home Widget Preview</p>
+                                <p class="text-[9px] text-on-surface-variant">Show home-screen interactive widget floating overlay</p>
+                            </div>
+                            <input type="checkbox" id="form-profile-widget-enabled" class="rounded border-outline-variant bg-zinc-900 text-primary focus:ring-primary w-4.5 h-4.5" onchange="toggleFloatingWidget(this.checked)"/>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-[12px] font-bold text-on-surface">Language Translation</p>
+                                <p class="text-[9px] text-on-surface-variant">Select interface text language</p>
+                            </div>
+                            <select id="form-profile-lang" class="bg-zinc-900 border border-outline-variant rounded-xl text-xs text-on-surface px-2 py-1 focus:outline-none">
+                                <option value="en">English (US)</option>
+                                <option value="te">Telugu (తెలుగు)</option>
+                                <option value="hi">Hindi (हिन्दी)</option>
+                                <option value="es">Spanish (Español)</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="flex flex-wrap gap-2 pt-2">
+                        <button type="submit" class="flex-1 min-w-[120px] py-2.5 bg-primary text-on-primary rounded-xl font-bold text-sm active:scale-95 transition-all">Save Changes</button>
+                        <button type="button" onclick="handleAuthSignOut()" class="px-4 py-2.5 bg-surface-container-high text-on-surface border border-outline-variant/60 rounded-xl font-bold text-sm hover:bg-surface-container-highest transition-all">Sign Out</button>
+                        <button type="button" onclick="resetAppData()" class="px-4 py-2.5 bg-error/10 text-error border border-error/20 rounded-xl font-bold text-sm hover:bg-error/20 transition-all">Reset</button>
+                        <button type="button" onclick="deleteUserAccount()" class="px-4 py-2.5 bg-error/20 text-error border border-error/30 rounded-xl font-bold text-sm hover:bg-error/30 transition-all">Delete Account</button>
+                    </div>
+                </form>
+
+                <!-- Change Password Section -->
+                <div class="mt-5 pt-4 border-t border-outline-variant/30">
+                    <h3 class="text-[12px] font-bold text-on-surface-variant uppercase tracking-wider mb-3">Change Password</h3>
+                    <form id="change-password-form" onsubmit="handleChangePassword(event)" class="space-y-3">
+                        <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Current Password</label><input aria-label="Current password" type="password" id="cp-current" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none" placeholder="Current password" required/></div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">New Password</label><input aria-label="New password" type="password" id="cp-new" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none" placeholder="Min 8 chars + 1 digit" required/></div>
+                            <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Confirm New</label><input aria-label="Confirm new password" type="password" id="cp-confirm" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none" placeholder="Repeat new password" required/></div>
+                        </div>
+                        <button type="submit" class="w-full py-2.5 bg-surface-container-high border border-outline-variant/60 text-on-surface rounded-xl font-bold text-sm active:scale-95">Update Password</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Forgot Password Modal -->
+    <div class="fixed inset-0 z-[80] hidden" id="forgotPasswordModal">
+        <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" onclick="toggleModal('forgotPasswordModal')"></div>
+        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-sm glass-card rounded-2xl p-6 shadow-2xl border border-outline-variant/50">
+            <div class="flex justify-between items-start mb-5">
+                <div><h2 class="font-bold text-[18px] text-on-surface">Forgot Password</h2><p class="text-[13px] text-on-surface-variant mt-0.5">Enter your email to receive a reset token</p></div>
+                <button aria-label="Close forgot password modal" class="text-on-surface-variant hover:text-on-surface p-1.5 rounded-xl hover:bg-surface-container-high" onclick="toggleModal('forgotPasswordModal')"><span class="material-symbols-outlined text-[20px]">close</span></button>
+            </div>
+            <!-- Step 1: Email -->
+            <div id="fp-step-email">
+                <form onsubmit="handleForgotPassword(event)" class="space-y-4">
+                    <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Email Address</label><input aria-label="Email address for password reset" type="email" id="fp-email" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-3 focus:border-primary focus:outline-none" placeholder="your@email.com" required/></div>
+                    <button type="submit" class="w-full py-2.5 bg-primary text-on-primary rounded-xl font-bold text-sm">Send Reset Token</button>
+                </form>
+            </div>
+            <!-- Step 2: Token + New Password -->
+            <div id="fp-step-reset" class="hidden space-y-4">
+                <p class="text-[12px] text-secondary bg-secondary/10 rounded-xl p-3 border border-secondary/20">Reset token sent! In dev mode, check the server console. Paste the token below.</p>
+                <form onsubmit="handleResetPassword(event)" class="space-y-3">
+                    <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Reset Token</label><input aria-label="Password reset token" type="text" id="fp-token" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none" placeholder="Paste token from console" required/></div>
+                    <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">New Password</label><input aria-label="New password" type="password" id="fp-new-password" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none" placeholder="Min 8 chars + 1 digit" required/></div>
+                    <button type="submit" class="w-full py-2.5 bg-primary text-on-primary rounded-xl font-bold text-sm">Reset Password</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leave Plan Modal (NEW) -->
+    <div class="fixed inset-0 z-[60] hidden" id="leavePlanModal">
+        <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" onclick="toggleModal('leavePlanModal')"></div>
+        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md glass-card rounded-2xl p-6 shadow-2xl border border-outline-variant/50">
+            <div class="flex justify-between items-start mb-5">
+                <div><h2 class="font-bold text-[18px] text-on-surface">Add Leave Plan</h2><p class="text-[13px] text-on-surface-variant mt-0.5">Schedule a planned absence period</p></div>
+                <button class="text-on-surface-variant hover:text-on-surface p-1.5 rounded-xl hover:bg-surface-container-high" onclick="toggleModal('leavePlanModal')"><span class="material-symbols-outlined text-[20px]">close</span></button>
+            </div>
+            <form id="leave-plan-form" onsubmit="handleCreateLeavePlan(event)" class="space-y-4">
+                <div>
+                    <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Title / Reason</label>
+                    <input type="text" id="leave-plan-title" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none" placeholder="e.g. Medical Leave" required/>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Start Date</label>
+                        <input type="date" id="leave-plan-start" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none" required/>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">End Date</label>
+                        <input type="date" id="leave-plan-end" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none" required/>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Type</label>
+                    <select id="leave-plan-type" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none">
+                        <option value="Medical">Medical</option>
+                        <option value="Personal">Personal</option>
+                        <option value="Duty">Duty Leave</option>
+                        <option value="Holiday">Holiday</option>
+                    </select>
+                </div>
+                <button type="submit" class="w-full py-3 bg-primary text-on-primary rounded-xl font-bold text-sm active:scale-95 transition-all hover:bg-primary/90 flex items-center justify-center gap-2">
+                    <span class="material-symbols-outlined text-[18px]">event_available</span> Create Leave Plan
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Subject Modal (NEW) -->
+    <div class="fixed inset-0 z-[60] hidden" id="subjectModal">
+        <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" onclick="toggleModal('subjectModal')"></div>
+        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md glass-card rounded-2xl p-6 shadow-2xl border border-outline-variant/50 max-h-[90vh] overflow-y-auto no-scrollbar">
+            <div class="flex justify-between items-start mb-5">
+                <div><h2 class="font-bold text-[18px] text-on-surface" id="subject-modal-title">Add Subject</h2><p class="text-[13px] text-on-surface-variant mt-0.5">Configure subject details</p></div>
+                <button class="text-on-surface-variant hover:text-on-surface p-1.5 rounded-xl hover:bg-surface-container-high" onclick="toggleModal('subjectModal')"><span class="material-symbols-outlined text-[20px]">close</span></button>
+            </div>
+            <form id="subject-form" onsubmit="saveSubject(event)" class="space-y-4">
+                <input type="hidden" id="edit-subject-id" value=""/>
+                <div>
+                    <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Subject Name</label>
+                    <input type="text" id="subject-form-name" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none" placeholder="e.g. Operating Systems" required/>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Subject Code</label>
+                        <input type="text" id="subject-form-code" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none" placeholder="e.g. CS-301"/>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Faculty Name</label>
+                        <input type="text" id="subject-form-prof" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none" placeholder="e.g. Dr. Jane Doe"/>
+                    </div>
+                </div>
+                <div class="grid grid-cols-3 gap-2">
+                    <div>
+                        <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Credits</label>
+                        <input type="number" min="1" max="10" id="subject-form-credits" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none" value="3" required/>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Type</label>
+                        <select id="subject-form-type" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none">
+                            <option value="Theory">Theory</option>
+                            <option value="Lab">Lab</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Target %</label>
+                        <input type="number" min="50" max="99" id="subject-form-goal" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none" value="75" required/>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Weekly Classes</label>
+                        <input type="number" min="1" max="20" id="subject-form-weekly" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none" value="4"/>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Total Planned</label>
+                        <input type="number" min="1" max="100" id="subject-form-total-planned" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none" value="40"/>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Color Accent</label>
+                    <div class="flex gap-2 flex-wrap" id="subject-form-colors"></div>
+                    <input type="hidden" id="subject-form-color-val" value="#7c4dff"/>
+                </div>
+                <button type="submit" class="w-full py-3 bg-primary text-on-primary rounded-xl font-bold text-sm active:scale-95 transition-all hover:bg-primary/90">Save Subject</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Security PIN Keypad Overlay -->
+    <div id="pinLockOverlay" class="fixed inset-0 z-[300] bg-background/98 backdrop-blur-md flex flex-col justify-center items-center hidden">
+        <div class="w-full max-w-[280px] text-center space-y-6">
+            <div class="space-y-1">
+                <span class="material-symbols-outlined text-primary text-[42px] animate-bounce">lock</span>
+                <h2 class="font-bold text-[18px] text-on-surface">Secure Access</h2>
+                <p id="pin-lock-prompt" class="text-[12px] text-on-surface-variant">Enter your 4-digit security PIN</p>
+            </div>
+            <!-- Pin Dots -->
+            <div class="flex justify-center gap-4 py-2">
+                <div class="w-3.5 h-3.5 rounded-full border-2 border-outline-variant/60 bg-transparent transition-all" id="pin-dot-1"></div>
+                <div class="w-3.5 h-3.5 rounded-full border-2 border-outline-variant/60 bg-transparent transition-all" id="pin-dot-2"></div>
+                <div class="w-3.5 h-3.5 rounded-full border-2 border-outline-variant/60 bg-transparent transition-all" id="pin-dot-3"></div>
+                <div class="w-3.5 h-3.5 rounded-full border-2 border-outline-variant/60 bg-transparent transition-all" id="pin-dot-4"></div>
+            </div>
+            <!-- Numeric Keypad -->
+            <div class="grid grid-cols-3 gap-3">
+                <button onclick="pressPinNum(1)" class="w-16 h-16 rounded-full bg-surface-container-high/40 hover:bg-surface-container-high border border-outline-variant/20 flex items-center justify-center font-bold text-xl text-on-surface active:scale-90 transition-all">1</button>
+                <button onclick="pressPinNum(2)" class="w-16 h-16 rounded-full bg-surface-container-high/40 hover:bg-surface-container-high border border-outline-variant/20 flex items-center justify-center font-bold text-xl text-on-surface active:scale-90 transition-all">2</button>
+                <button onclick="pressPinNum(3)" class="w-16 h-16 rounded-full bg-surface-container-high/40 hover:bg-surface-container-high border border-outline-variant/20 flex items-center justify-center font-bold text-xl text-on-surface active:scale-90 transition-all">3</button>
+                <button onclick="pressPinNum(4)" class="w-16 h-16 rounded-full bg-surface-container-high/40 hover:bg-surface-container-high border border-outline-variant/20 flex items-center justify-center font-bold text-xl text-on-surface active:scale-90 transition-all">4</button>
+                <button onclick="pressPinNum(5)" class="w-16 h-16 rounded-full bg-surface-container-high/40 hover:bg-surface-container-high border border-outline-variant/20 flex items-center justify-center font-bold text-xl text-on-surface active:scale-90 transition-all">5</button>
+                <button onclick="pressPinNum(6)" class="w-16 h-16 rounded-full bg-surface-container-high/40 hover:bg-surface-container-high border border-outline-variant/20 flex items-center justify-center font-bold text-xl text-on-surface active:scale-90 transition-all">6</button>
+                <button onclick="pressPinNum(7)" class="w-16 h-16 rounded-full bg-surface-container-high/40 hover:bg-surface-container-high border border-outline-variant/20 flex items-center justify-center font-bold text-xl text-on-surface active:scale-90 transition-all">7</button>
+                <button onclick="pressPinNum(8)" class="w-16 h-16 rounded-full bg-surface-container-high/40 hover:bg-surface-container-high border border-outline-variant/20 flex items-center justify-center font-bold text-xl text-on-surface active:scale-90 transition-all">8</button>
+                <button onclick="pressPinNum(9)" class="w-16 h-16 rounded-full bg-surface-container-high/40 hover:bg-surface-container-high border border-outline-variant/20 flex items-center justify-center font-bold text-xl text-on-surface active:scale-90 transition-all">9</button>
+                <button onclick="simulateBiometricUnlock()" class="w-16 h-16 rounded-full flex items-center justify-center text-primary active:scale-90 transition-all"><span class="material-symbols-outlined text-[28px]">fingerprint</span></button>
+                <button onclick="pressPinNum(0)" class="w-16 h-16 rounded-full bg-surface-container-high/40 hover:bg-surface-container-high border border-outline-variant/20 flex items-center justify-center font-bold text-xl text-on-surface active:scale-90 transition-all">0</button>
+                <button onclick="clearPinInput()" class="w-16 h-16 rounded-full flex items-center justify-center text-error active:scale-90 transition-all"><span class="material-symbols-outlined text-[22px]">backspace</span></button>
+            </div>
+            <p class="text-[11px] text-on-surface-variant">Biometric face/fingerprint simulation active</p>
+        </div>
+    </div>
+
+    <!-- FLOATING HOME WIDGET PREVIEW -->
+    <div id="floating-widget-preview" class="fixed right-5 bottom-20 z-40 w-64 glass-card rounded-2xl p-4 shadow-2xl border border-outline-variant hidden transition-all duration-300 transform scale-95 translate-y-4">
+        <div class="flex justify-between items-center border-b border-outline-variant/20 pb-2 mb-2">
+            <span class="text-[9px] font-extrabold uppercase tracking-widest text-primary flex items-center gap-1">
+                <span class="material-symbols-outlined text-[12px]">widgets</span> Home Widget
+            </span>
+            <button onclick="toggleFloatingWidget(false)" class="text-on-surface-variant hover:text-on-surface"><span class="material-symbols-outlined text-[14px]">close</span></button>
+        </div>
+        <div class="space-y-3">
+            <div class="flex justify-between items-center">
+                <div>
+                    <p id="widget-overall-pct" class="font-extrabold text-[22px] text-secondary">0%</p>
+                    <p class="text-[9px] text-on-surface-variant font-bold uppercase tracking-wider">Attendance</p>
+                </div>
+                <div class="text-right">
+                    <p id="widget-classes-rem" class="font-extrabold text-sm text-primary">0 Classes</p>
+                    <p class="text-[9px] text-on-surface-variant font-bold uppercase tracking-wider">Remaining</p>
+                </div>
+            </div>
+            <div class="bg-zinc-900/60 p-2.5 rounded-xl border border-outline-variant/30">
+                <p class="text-[8px] font-bold text-primary uppercase tracking-wider mb-1">Current Period</p>
+                <h4 id="widget-current-class" class="font-bold text-[11px] text-on-surface truncate">Free Period</h4>
+                <p id="widget-countdown" class="text-[10px] text-secondary font-semibold mt-0.5">00:00 remaining</p>
+            </div>
+            <div id="widget-warning-banner" class="hidden p-2 rounded-xl bg-error/15 text-error border border-error/20 text-[9px] font-semibold text-center animate-pulse">
+                ⚠️ Attendance below 75%!
+            </div>
+        </div>
+    </div>
+
+    <!-- Mobile Sidebar Overlay -->
+    <div id="mobile-sidebar-overlay" class="fixed inset-0 z-[70] hidden">
+        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="toggleMobileSidebar()"></div>
+        <aside class="absolute left-0 top-0 w-64 h-full bg-surface-container-low border-r border-outline-variant/30 flex flex-col animate-slide-down">
+            <div class="px-5 py-5 border-b border-outline-variant/20 flex items-center gap-3">
+                <div class="w-9 h-9 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0">
+                    <span class="material-symbols-outlined text-primary text-[20px]">school</span>
+                </div>
+                <div><h1 class="font-bold text-[17px] text-primary leading-none">AttendWise</h1><p class="text-[10px] text-on-surface-variant mt-0.5">AI Attendance</p></div>
+                <button onclick="toggleMobileSidebar()" class="ml-auto p-1.5 rounded-xl hover:bg-surface-container-high"><span class="material-symbols-outlined text-[20px] text-on-surface-variant">close</span></button>
+            </div>
+            <nav class="flex-1 px-3 py-4 space-y-0.5">
+                <button onclick="tabNavigation('dashboard');toggleMobileSidebar()" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-all text-left font-semibold text-sm">
+                    <span class="material-symbols-outlined text-[20px]">dashboard</span> Dashboard
+                </button>
+                <button onclick="tabNavigation('daily');toggleMobileSidebar()" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-all text-left font-semibold text-sm">
+                    <span class="material-symbols-outlined text-[20px]">fact_check</span> Daily Log
+                </button>
+                <button onclick="tabNavigation('analytics');toggleMobileSidebar()" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-all text-left font-semibold text-sm">
+                    <span class="material-symbols-outlined text-[20px]">analytics</span> Analytics
+                </button>
+                <button onclick="tabNavigation('reports');toggleMobileSidebar()" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-all text-left font-semibold text-sm">
+                    <span class="material-symbols-outlined text-[20px]">description</span> Reports
+                </button>
+                <button onclick="tabNavigation('schedule');toggleMobileSidebar()" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-all text-left font-semibold text-sm">
+                    <span class="material-symbols-outlined text-[20px]">calendar_today</span> Schedule
+                </button>
+            </nav>
+            <div class="px-4 py-4 border-t border-outline-variant/20">
+                <button onclick="openProfileModal();toggleMobileSidebar()" class="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-surface-container-high transition-colors text-left">
+                    <div class="w-8 h-8 rounded-full bg-surface-container-highest border border-outline-variant flex items-center justify-center flex-shrink-0">
+                        <span class="material-symbols-outlined text-[16px] text-on-surface-variant">person</span>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <p class="font-semibold text-[13px] text-on-surface truncate">Profile & Settings</p>
+                    </div>
+                </button>
+            </div>
+        </aside>
+    </div>
+
+    <!-- Application Script Connection -->
+</body>
+</html>
