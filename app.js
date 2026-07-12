@@ -6,7 +6,7 @@ import { createClient } from '@supabase/supabase-js';
 // AttendWise AI Student Attendance Companion - Core Business Logic & State Engine
 // Supports offline-first LocalCache (localStorage) and real calculations.
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || window.location.origin;
+const API_BASE_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || window.location.origin;
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
