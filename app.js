@@ -622,25 +622,40 @@ function toggleModal(modalId) {
 // 5. CALCULATIONS ENGINE (BUSINESS LOGIC)
 // ============================================================================
 
+// Returns duration weight (in hours) for a class entry.
+// Timetable entries have start/end. Attendance logs also store start/end.
+// Labs (Practical/Hybrid types) or long sessions count as their full duration.
+// Falls back to 1 if time is unavailable.
+function getClassWeight(cls) {
+    if (!cls.start || !cls.end) return 1;
+    const [sh, sm] = cls.start.split(':').map(Number);
+    const [eh, em] = cls.end.split(':').map(Number);
+    const durationHours = (eh * 60 + em - sh * 60 - sm) / 60;
+    // Clamp to a reasonable range (at least 1, at most 4 hours)
+    return Math.max(1, Math.min(4, Math.round(durationHours)));
+}
+
+
 function calculateGlobalAttendance() {
-    let presentCount = 0;
-    let absentCount = 0;
+    let presentHours = 0;
+    let absentHours = 0;
     
     Object.values(appState.attendanceLogs).forEach(dayLogs => {
         dayLogs.forEach(cls => {
-            if (cls.status === "present") presentCount++;
-            if (cls.status === "absent") absentCount++;
+            const weight = getClassWeight(cls);
+            if (cls.status === "present") presentHours += weight;
+            if (cls.status === "absent") absentHours += weight;
         });
     });
     
-    const totalConducted = presentCount + absentCount;
-    const percentage = totalConducted > 0 ? Math.round((presentCount / totalConducted) * 100) : 0;
+    const totalConducted = presentHours + absentHours;
+    const percentage = totalConducted > 0 ? Math.round((presentHours / totalConducted) * 100) : 0;
     
     return {
         percentage,
-        present: presentCount,
-        absent: absentCount,
-        total: totalConducted
+        present: Math.round(presentHours),
+        absent: Math.round(absentHours),
+        total: Math.round(totalConducted)
     };
 }
 
@@ -661,25 +676,29 @@ function calculateSubjectAttendance() {
         };
     });
     
-    // Add logs
+    // Add logs (duration-weighted: labs count by hours)
     Object.values(appState.attendanceLogs).forEach(dayLogs => {
         dayLogs.forEach(cls => {
             if (subjectStats[cls.subject]) {
+                const weight = getClassWeight(cls);
                 if (cls.status === "present") {
-                    subjectStats[cls.subject].present++;
-                    subjectStats[cls.subject].total++;
+                    subjectStats[cls.subject].present += weight;
+                    subjectStats[cls.subject].total += weight;
                 } else if (cls.status === "absent") {
-                    subjectStats[cls.subject].absent++;
-                    subjectStats[cls.subject].total++;
+                    subjectStats[cls.subject].absent += weight;
+                    subjectStats[cls.subject].total += weight;
                 }
             }
         });
     });
     
-    // Calculate individual percentages
+    // Calculate individual percentages (round totals for display)
     Object.keys(subjectStats).forEach(name => {
         const stats = subjectStats[name];
         stats.percent = stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0;
+        stats.present = Math.round(stats.present);
+        stats.absent = Math.round(stats.absent);
+        stats.total = Math.round(stats.total);
     });
     
     return subjectStats;
