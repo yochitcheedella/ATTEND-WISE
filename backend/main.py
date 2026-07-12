@@ -84,12 +84,24 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Configure CORS
 allowed_origins_str = os.getenv("ALLOWED_ORIGINS", "")
-allowed_origins = [origin.strip() for origin in allowed_origins_str.split(",")] if allowed_origins_str else ["*"]
+if allowed_origins_str:
+    allowed_origins = [origin.strip() for origin in allowed_origins_str.split(",")]
+else:
+    # Default to accepting Vercel, localhost, and Capacitor
+    allowed_origins = [
+        "https://attend-wise.vercel.app",
+        "http://localhost:5173",
+        "capacitor://localhost",
+        "http://localhost"
+    ]
 
+# If we have specific origins, we can allow credentials. If it's literally just ["*"], we can't.
+# Vercel gives random branch preview URLs, so sometimes it's easier to use allow_origin_regex
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_credentials=True if allowed_origins != ["*"] else False,
+    allow_origin_regex=r"https://.*\.vercel\.app", # Matches any vercel preview deployment
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -2313,19 +2325,6 @@ def get_assetlinks():
         }
     }]
 
-# SPA Fallback Routes (Must be defined at the bottom to avoid intercepting specific API routes)
-if os.path.exists(frontend_dist):
-    @app.get("/", tags=["Root"])
-    def read_root():
-        return FileResponse(os.path.join(frontend_dist, "index.html"))
-        
-    @app.get("/{catchall:path}", tags=["Root"])
-    def serve_spa(catchall: str):
-        file_path = os.path.join(frontend_dist, catchall)
-        if os.path.exists(file_path) and os.path.isfile(file_path):
-            return FileResponse(file_path)
-        return FileResponse(os.path.join(frontend_dist, "index.html"))
-else:
-    @app.get("/", tags=["Root"])
-    def read_root():
-        return {"message": "Welcome to AttendWise API. Frontend build not found. Visit /docs for Swagger UI."}
+@app.get("/", tags=["Root"])
+def read_root():
+    return {"message": "Welcome to AttendWise API. Backend is running. Visit /docs for Swagger UI."}
