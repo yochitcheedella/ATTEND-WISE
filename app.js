@@ -3,6 +3,46 @@
 
 const API_BASE_URL = window.location.origin;
 
+// ============================================================================
+// GLOBAL FETCH INTERCEPTOR & OFFLINE DETECTION (Phase 1 & 2)
+// ============================================================================
+const originalFetch = window.fetch;
+window.fetch = async function(...args) {
+    if (!navigator.onLine) {
+        showToast("Offline", "You are currently offline. Check your connection.", "wifi_off");
+    }
+    
+    try {
+        const response = await originalFetch.apply(this, args);
+        if (response.status === 401) {
+            console.warn("Unauthorized API call. Token expired.");
+            showToast("Session Expired", "Please log in again.", "lock");
+            
+            // Wipe token and force redirect to login
+            localStorage.removeItem("attendwise_token");
+            document.getElementById("main-content").classList.add("hidden");
+            document.getElementById("desktop-sidebar").classList.add("hidden");
+            document.getElementById("mobile-nav").classList.add("hidden");
+            const screen = document.getElementById("auth-screen");
+            if (screen) screen.classList.remove("hidden");
+        }
+        return response;
+    } catch (err) {
+        if (!navigator.onLine) {
+            console.warn("Fetch failed due to offline status:", err);
+        }
+        throw err; // Let caller handle it
+    }
+};
+
+window.addEventListener('offline', () => {
+    showToast("Offline", "You have lost internet connection.", "wifi_off");
+});
+
+window.addEventListener('online', () => {
+    showToast("Online", "Internet connection restored.", "wifi");
+});
+
 
 // ============================================================================
 // 1. DEFAULT DATA CONFIGURATION
@@ -203,6 +243,11 @@ async function handleAuthSignUp(e) {
     const branch = document.getElementById("signup-branch").value.trim();
     const goal = parseFloat(document.getElementById("signup-goal").value);
     const semester = document.getElementById("signup-semester").value;
+    
+    if (password.length < 6) {
+        showToast("Weak Password", "Password must be at least 6 characters.", "warning");
+        return;
+    }
     
     try {
         const response = await fetch(`${API_BASE_URL}/auth/register`, {
@@ -1105,13 +1150,16 @@ function renderDashboardSubjectSummary() {
             actionText = `Must attend next ${classesNeeded} class${classesNeeded !== 1 ? 'es' : ''}`;
         }
         
+        const safeName = escapeHTML(name);
+        const safeProf = escapeHTML(stats.prof || 'No Faculty');
+        
         const row = document.createElement("div");
         row.className = "bg-surface-container-low p-3 rounded-xl border border-outline-variant/30 space-y-1.5";
         row.innerHTML = `
             <div class="flex justify-between items-start">
                 <div class="min-w-0 flex-1">
-                    <h4 class="font-extrabold text-[12px] text-on-surface leading-tight truncate mr-2" title="${name}">${name}</h4>
-                    <p class="text-[10px] text-on-surface-variant font-medium mt-0.5">${stats.prof || 'No Faculty'}</p>
+                    <h4 class="font-extrabold text-[12px] text-on-surface leading-tight truncate mr-2" title="${safeName}">${safeName}</h4>
+                    <p class="text-[10px] text-on-surface-variant font-medium mt-0.5">${safeProf}</p>
                 </div>
                 <div class="text-right flex-shrink-0">
                     <span class="px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wider ${badgeColor}">${status}</span>
@@ -1153,18 +1201,61 @@ function renderDashboardRecentLogs() {
         const label = labelMap[log.status] || log.status;
         const dateShort = new Date(log.date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
         const item = document.createElement("div");
-        item.className = "relative pl-1 mb-3 last:mb-0";
+        item.className = "relative pl-1 mb-3 last:mb-0 flex justify-between items-center group";
         item.innerHTML = `
-            <div class="absolute -left-[17px] top-1.5 w-2 h-2 rounded-full ${dot} border border-background"></div>
-            <div class="flex justify-between items-center">
-                <span class="font-bold text-[11px] text-on-surface truncate max-w-[130px]" title="${log.subject}">${log.subject}</span>
-                <span class="text-[9px] text-on-surface-variant">${dateShort}</span>
+            <div class="flex-1 min-w-0">
+                <div class="absolute -left-[17px] top-1.5 w-2 h-2 rounded-full ${dot} border border-background"></div>
+                <div class="flex justify-between items-center pr-2">
+                    <span class="font-bold text-[11px] text-on-surface truncate max-w-[120px]" title="${log.subject}">${log.subject}</span>
+                    <span class="text-[9px] text-on-surface-variant">${dateShort}</span>
+                </div>
+                <p class="text-[10px] text-on-surface-variant mt-0.5">Marked <span class="font-semibold text-on-surface">${label}</span></p>
             </div>
-            <p class="text-[10px] text-on-surface-variant mt-0.5">Marked <span class="font-semibold text-on-surface">${label}</span></p>
+            <button onclick="undoAttendance('${log.date}', '${log.subject}', '${log.start}')" class="opacity-0 group-hover:opacity-100 p-1.5 bg-error/10 text-error hover:bg-error hover:text-white rounded-lg transition-all" title="Undo Attendance">
+                <span class="material-symbols-outlined text-[14px]">undo</span>
+            </button>
         `;
         box.appendChild(item);
     });
 }
+
+window.undoAttendance = async function(dateStr, subjectName, startStr) {
+    if (!appState.attendanceLogs[dateStr]) return;
+    
+    // Find the log
+    const cls = appState.attendanceLogs[dateStr].find(c => c.subject === subjectName && c.start === startStr);
+    if (!cls) return;
+    
+    // Optimistic update
+    cls.status = "upcoming";
+    saveState();
+    
+    // Re-render UI immediately
+    renderDashboardRecentLogs();
+    renderDashboardSubjectSummary();
+    updateSemesterDashboard();
+    
+    // Sync with backend
+    try {
+        await fetch(`${API_BASE_URL}/attendance/mark`, {
+            method: "POST",
+            headers: { 
+                "Content-Type": "application/json",
+                ...getAuthHeaders() 
+            },
+            body: JSON.stringify({
+                date: dateStr,
+                subject_name: subjectName,
+                start: startStr,
+                status: "upcoming"
+            })
+        });
+        showToast("Log Removed", `Undid attendance for ${subjectName}.`, "undo");
+    } catch (err) {
+        console.error("Failed to undo attendance:", err);
+        showToast("Error", "Could not reach server to undo attendance.", "error");
+    }
+};
 
 function renderDashboardAiInsights(global, analysis, displayStreak) {
     const box = document.getElementById("dash-ai-insight-box");
