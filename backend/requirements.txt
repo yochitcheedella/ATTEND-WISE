@@ -14,3 +14,4 @@ email-validator
 psycopg2-binary
 slowapi
 limits
+requests
