@@ -1,7 +1,23 @@
+import { StatusBar, Style } from '@capacitor/status-bar';
+import { SplashScreen } from '@capacitor/splash-screen';
+import { Keyboard, KeyboardResize } from '@capacitor/keyboard';
+
 // AttendWise AI Student Attendance Companion - Core Business Logic & State Engine
 // Supports offline-first LocalCache (localStorage) and real calculations.
 
-const API_BASE_URL = window.location.origin;
+const API_BASE_URL = import.meta.env.VITE_API_URL || window.location.origin;
+
+// Initialize Capacitor Plugins
+try {
+    StatusBar.setStyle({ style: Style.Dark });
+    StatusBar.setOverlaysWebView({ overlay: false });
+    Keyboard.setResizeMode({ mode: KeyboardResize.Native });
+    setTimeout(() => {
+        SplashScreen.hide();
+    }, 1000); // Hide splash screen after 1s
+} catch (e) {
+    console.warn("Capacitor plugins not available in web mode.");
+}
 
 // ============================================================================
 // GLOBAL FETCH INTERCEPTOR & OFFLINE DETECTION (Phase 1 & 2)

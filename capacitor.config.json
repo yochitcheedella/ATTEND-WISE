@@ -1,5 +1,1 @@
-{
-  "appId": "com.attendwise.app",
-  "appName": "AttendWise",
-  "webDir": "dist"
-}
+{"appId": "com.attendwise.app", "appName": "AttendWise", "webDir": "dist", "bundledWebRuntime": false, "android": {"allowMixedContent": false}, "server": {"androidScheme": "https"}}
