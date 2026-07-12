@@ -14,10 +14,21 @@ try {
     Keyboard.setResizeMode({ mode: KeyboardResize.Native });
     setTimeout(() => {
         SplashScreen.hide();
-    }, 1000); // Hide splash screen after 1s
+    }, 500); // Hide native splash screen quickly to show our beautiful CSS splash
 } catch (e) {
     console.warn("Capacitor plugins not available in web mode.");
 }
+
+// Fade out and remove the custom CSS splash screen after animation completes
+window.addEventListener('DOMContentLoaded', () => {
+    const splash = document.getElementById('custom-splash-screen');
+    if (splash) {
+        setTimeout(() => {
+            splash.style.opacity = '0';
+            setTimeout(() => splash.remove(), 1000);
+        }, 2200); // Show splash for 2.2s before fading out
+    }
+});
 
 // ============================================================================
 // GLOBAL FETCH INTERCEPTOR & OFFLINE DETECTION (Phase 1 & 2)
