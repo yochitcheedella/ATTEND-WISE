@@ -9,8 +9,13 @@ import { createClient } from '@supabase/supabase-js';
 const API_BASE_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || window.location.origin;
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
-
+const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey, {
+    auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+    }
+}) : null;
 
 // Initialize Capacitor Plugins
 try {
@@ -24,16 +29,25 @@ try {
     console.warn("Capacitor plugins not available in web mode.");
 }
 
-// Fade out and remove the custom CSS splash screen after animation completes
-window.addEventListener('DOMContentLoaded', () => {
+// Function to handle the custom CSS splash screen fade out
+function removeSplashScreen() {
     const splash = document.getElementById('custom-splash-screen');
-    if (splash) {
-        setTimeout(() => {
-            splash.style.opacity = '0';
-            setTimeout(() => splash.remove(), 1000);
-        }, 2200); // Show splash for 2.2s before fading out
+    if (splash && splash.style.opacity !== '0') {
+        splash.style.opacity = '0';
+        setTimeout(() => splash.remove(), 1000);
     }
-});
+}
+
+// Global Auth State Listener to sync backend access token
+if (supabase) {
+    supabase.auth.onAuthStateChange((event, session) => {
+        if (session) {
+            localStorage.setItem("access_token", session.access_token);
+        } else {
+            localStorage.removeItem("access_token");
+        }
+    });
+}
 
 // ============================================================================
 // GLOBAL FETCH INTERCEPTOR & OFFLINE DETECTION (Phase 1 & 2)
@@ -427,11 +441,23 @@ async function initAppState() {
         if (overlay) overlay.classList.remove("hidden");
     }
 
-    const token = localStorage.getItem("access_token");
-    if (!token) {
+    if (!supabase) {
         showAuthScreen();
+        removeSplashScreen();
         return;
     }
+
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    if (!session) {
+        localStorage.removeItem("access_token");
+        showAuthScreen();
+        removeSplashScreen();
+        return;
+    }
+    
+    // Sync the local access token from the session before doing API requests
+    localStorage.setItem("access_token", session.access_token);
     
     try {
         const response = await fetch(`${API_BASE_URL}/state`, {
@@ -520,6 +546,9 @@ async function initAppState() {
         if (avatarImg) avatarImg.classList.add("hidden");
         if (avatarIcon) avatarIcon.classList.remove("hidden");
     }
+    
+    // Check finished, ready to reveal the app
+    removeSplashScreen();
 }
 
 async function saveStateToLocalStorage() {
