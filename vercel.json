@@ -1,1 +1,8 @@
-{"rewrites": [{"source": "/(.*)", "destination": "/index.html"}]}
+{
+  "rewrites": [
+    {
+      "source": "/((?!.*\\.apk$|.*\\.png$|.*\\.jpg$|.*\\.webp$|.*\\.js$|.*\\.css$|.*\\.ico$|.*\\.json$).*)",
+      "destination": "/index.html"
+    }
+  ]
+}
