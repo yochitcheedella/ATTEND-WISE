@@ -24,37 +24,48 @@ models.Base.metadata.create_all(bind=engine)
 # In-memory password reset token store: {token_hash: {email, expires_at}}
 _reset_tokens: dict = {}
 
-# SQLite migrations — add new columns safely
-from sqlalchemy import text
-try:
-    with engine.begin() as conn:
-        result = conn.execute(text("PRAGMA table_info(subjects)"))
-        columns = [row[1] for row in result.fetchall()]
-        if "minimum_required_attendance" not in columns:
-            conn.execute(text("ALTER TABLE subjects ADD COLUMN minimum_required_attendance FLOAT DEFAULT 75.0"))
-        if "subject_type" not in columns:
-            conn.execute(text("ALTER TABLE subjects ADD COLUMN subject_type TEXT DEFAULT 'Theory'"))
-        if "weekly_classes" not in columns:
-            conn.execute(text("ALTER TABLE subjects ADD COLUMN weekly_classes INTEGER DEFAULT 4"))
-        if "total_planned_classes" not in columns:
-            conn.execute(text("ALTER TABLE subjects ADD COLUMN total_planned_classes INTEGER DEFAULT 40"))
+# Database migrations — add new columns safely (works with both SQLite and PostgreSQL)
+from sqlalchemy import text, inspect
 
-        result_sem = conn.execute(text("PRAGMA table_info(semesters)"))
-        columns_sem = [row[1] for row in result_sem.fetchall()]
-        if "academic_calendar" not in columns_sem:
+def _column_exists(conn, table_name: str, column_name: str, db_url: str) -> bool:
+    """Check if a column exists — works for both SQLite and PostgreSQL."""
+    if db_url.startswith("sqlite"):
+        result = conn.execute(text(f"PRAGMA table_info({table_name})"))
+        return any(row[1] == column_name for row in result.fetchall())
+    else:
+        result = conn.execute(text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = :tbl AND column_name = :col"
+        ), {"tbl": table_name, "col": column_name})
+        return result.fetchone() is not None
+
+try:
+    from .database import SQLALCHEMY_DATABASE_URL as _db_url
+    with engine.begin() as conn:
+        # subjects table
+        for col, coltype, default in [
+            ("minimum_required_attendance", "FLOAT", "75.0"),
+            ("subject_type", "TEXT", "'Theory'"),
+            ("weekly_classes", "INTEGER", "4"),
+            ("total_planned_classes", "INTEGER", "40"),
+        ]:
+            if not _column_exists(conn, "subjects", col, _db_url):
+                conn.execute(text(f"ALTER TABLE subjects ADD COLUMN {col} {coltype} DEFAULT {default}"))
+
+        # semesters table
+        if not _column_exists(conn, "semesters", "academic_calendar", _db_url):
             conn.execute(text("ALTER TABLE semesters ADD COLUMN academic_calendar TEXT"))
 
-        result_usr = conn.execute(text("PRAGMA table_info(users)"))
-        user_cols = [row[1] for row in result_usr.fetchall()]
+        # users table
         for col, coltype in [
-            ("roll_number", "TEXT"), 
-            ("section", "TEXT"), 
-            ("year", "TEXT"), 
+            ("roll_number", "TEXT"),
+            ("section", "TEXT"),
+            ("year", "TEXT"),
             ("profile_photo", "TEXT"),
             ("register_number", "TEXT"),
-            ("university", "TEXT")
+            ("university", "TEXT"),
         ]:
-            if col not in user_cols:
+            if not _column_exists(conn, "users", col, _db_url):
                 conn.execute(text(f"ALTER TABLE users ADD COLUMN {col} {coltype}"))
 except Exception as e:
     print("Migration warning:", e)
