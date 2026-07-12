@@ -2299,6 +2299,20 @@ def delete_user_profile(current_user: models.User = Depends(auth.get_current_use
     db.commit()
     return {"message": "Account deleted successfully"}
 
+# Android TWA Digital Asset Links Verification
+@app.get("/.well-known/assetlinks.json", tags=["Root"])
+def get_assetlinks():
+    return [{
+        "relation": ["delegate_permission/common.handle_all_urls"],
+        "target": {
+            "namespace": "android_app",
+            "package_name": "com.attendwise.app",
+            "sha256_cert_fingerprints": [
+                "24:7A:25:8E:03:D6:49:3D:AC:F2:FE:A1:FB:05:C6:1E:FA:6D:04:F6:B2:84:25:DE:8C:90:52:5D:65:66:AA:E1"
+            ]
+        }
+    }]
+
 # SPA Fallback Routes (Must be defined at the bottom to avoid intercepting specific API routes)
 if os.path.exists(frontend_dist):
     @app.get("/", tags=["Root"])
