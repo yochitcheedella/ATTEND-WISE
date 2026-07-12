@@ -13,6 +13,10 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
     
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#cdbdff">
+    
     <script id="tailwind-config">
       tailwind.config = {
         darkMode: "class",
@@ -272,6 +276,18 @@
         .leave-personal { background: rgba(255,179,174,0.15); color: #ffb3ae; border: 1px solid rgba(255,179,174,0.2); }
     </style>
 
+    <!-- PWA Service Worker Registration -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').then((registration) => {
+            console.log('ServiceWorker registration successful with scope: ', registration.scope);
+          }, (err) => {
+            console.log('ServiceWorker registration failed: ', err);
+          });
+        });
+      }
+    </script>
 </head>
 <body class="bg-background text-on-background font-body-md h-screen overflow-hidden flex selection:bg-primary/30">
 
