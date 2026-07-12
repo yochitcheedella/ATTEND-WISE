@@ -15,3 +15,5 @@ psycopg2-binary
 slowapi
 limits
 requests
+
+firebase-admin

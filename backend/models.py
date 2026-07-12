@@ -20,6 +20,7 @@ class User(Base):
     university = Column(String, nullable=True)
     attendance_goal = Column(Float, default=75.0)
     profile_photo = Column(Text, nullable=True)  # base64 or URL
+    fcm_token = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     subjects = relationship("Subject", back_populates="owner", cascade="all, delete-orphan")

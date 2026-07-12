@@ -17,6 +17,7 @@
     "deploy:prod": "cp -r dist/* ./backend/static/ && echo \"Frontend deployed to backend static directory\""
   },
   "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
     "@capacitor/cli": "^8.4.1",
     "@capacitor/core": "^8.4.1",
     "eslint": "^8.56.0",
@@ -30,7 +31,9 @@
   "dependencies": {
     "@capacitor/android": "^8.4.1",
     "@capacitor/keyboard": "^8.0.5",
+    "@capacitor/push-notifications": "^8.1.1",
     "@capacitor/splash-screen": "^8.0.1",
-    "@capacitor/status-bar": "^8.0.2"
+    "@capacitor/status-bar": "^8.0.2",
+    "@supabase/supabase-js": "^2.110.2"
   }
 }

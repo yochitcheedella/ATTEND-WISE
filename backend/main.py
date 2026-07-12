@@ -13,6 +13,13 @@ import json
 import math
 import secrets
 import hashlib
+import firebase_admin
+from firebase_admin import credentials, messaging
+try:
+    cred = credentials.Certificate('backend/firebase-adminsdk-key.json')
+    firebase_admin.initialize_app(cred)
+except Exception as e:
+    print(f'Firebase Admin init failed (missing file or invalid key): {e}')
 
 from fastapi.security import OAuth2PasswordRequestForm
 from . import models, schemas, auth
@@ -567,6 +574,12 @@ def delete_leave_plan(plan_id: int, current_user: models.User = Depends(auth.get
     return {"message": "Leave plan deleted successfully"}
 
 # --- Profile Updates ---
+@app.post("/user/device-token", tags=["App"])
+def register_device_token(payload: schemas.FCMTokenRequest, current_user: models.User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    current_user.fcm_token = payload.token
+    db.commit()
+    return {"message": "Device token registered"}
+
 @app.put("/user/profile", tags=["App"])
 def update_profile(profile: schemas.UserUpdate, current_user: models.User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
     current_user.name = profile.name
@@ -2328,3 +2341,17 @@ def get_assetlinks():
 @app.get("/", tags=["Root"])
 def read_root():
     return {"message": "Welcome to AttendWise API. Backend is running. Visit /docs for Swagger UI."}
+
+
+# --- FCM Push Notifications ---
+def send_push_notification(fcm_token: str, title: str, body: str):
+    if not fcm_token: return
+    try:
+        from firebase_admin import messaging
+        message = messaging.Message(
+            notification=messaging.Notification(title=title, body=body),
+            token=fcm_token
+        )
+        messaging.send(message)
+    except Exception as e:
+        print(f'Failed to send FCM: {e}')

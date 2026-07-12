@@ -1,11 +1,16 @@
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { SplashScreen } from '@capacitor/splash-screen';
 import { Keyboard, KeyboardResize } from '@capacitor/keyboard';
+import { createClient } from '@supabase/supabase-js';
 
 // AttendWise AI Student Attendance Companion - Core Business Logic & State Engine
 // Supports offline-first LocalCache (localStorage) and real calculations.
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || window.location.origin;
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
+
 
 // Initialize Capacitor Plugins
 try {
@@ -250,6 +255,7 @@ async function handleAuthSignIn(e) {
             localStorage.setItem("access_token", data.access_token);
             showToast("Login Successful", "Welcome to AttendWise!", "check_circle");
             await initAppState();
+            if (window.capacitorPushNotifications) registerPushNotifications();
             tabNavigation("dashboard");
         } else {
             const err = await response.json();
@@ -268,12 +274,18 @@ async function handleAuthSignUp(e) {
     const password = document.getElementById("signup-password").value;
     const college = document.getElementById("signup-college").value.trim();
     const branch = document.getElementById("signup-branch").value.trim();
-    const goal = parseFloat(document.getElementById("signup-goal").value);
+    const goalVal = document.getElementById("signup-goal").value.trim();
     const semester = document.getElementById("signup-semester").value;
     
     if (password.length < 6) {
         showToast("Weak Password", "Password must be at least 6 characters.", "warning");
         return;
+    }
+    
+    let goal = 75.0;
+    if (goalVal) {
+        goal = parseFloat(goalVal);
+        if (isNaN(goal)) goal = 75.0;
     }
     
     try {
@@ -286,18 +298,39 @@ async function handleAuthSignUp(e) {
                 name,
                 email,
                 password,
-                college,
-                branch,
+                college: college || null,
+                branch: branch || null,
                 attendance_goal: goal,
-                semester
+                semester: semester || null
             })
         });
         
         if (response.ok) {
-            showToast("Registration Successful", "Please log in with your credentials", "check_circle");
-            switchAuthTab("signin");
-            document.getElementById("signin-email").value = email;
-            document.getElementById("signin-password").value = password;
+            showToast("Registration Successful", "Logging you in...", "check_circle");
+            // Auto login after registration
+            const formData = new URLSearchParams();
+            formData.append("username", email);
+            formData.append("password", password);
+            
+            const loginRes = await fetch(`${API_BASE_URL}/auth/login`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded"
+                },
+                body: formData
+            });
+            
+            if (loginRes.ok) {
+                const data = await loginRes.json();
+                localStorage.setItem("access_token", data.access_token);
+                await initAppState();
+                hideAuthScreen();
+                tabNavigation("dashboard");
+            } else {
+                switchAuthTab("signin");
+                document.getElementById("signin-email").value = email;
+                document.getElementById("signin-password").value = password;
+            }
         } else {
             const err = await response.json();
             showToast("Registration Failed", err.message || err.detail || "Could not register account", "error");
@@ -364,31 +397,24 @@ async function handleResetPassword(e) {
 }
 
 async function handleGoogleSignIn() {
-    showToast("Google Sign-In", "Simulating Google Account connection...", "insights");
-    setTimeout(async () => {
-        const name = "Google Student";
-        const email = "google_student@example.com";
-        try {
-            const response = await fetch(`${API_BASE_URL}/auth/google-login`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name, email })
-            });
-            if (response.ok) {
-                const data = await response.json();
-                localStorage.setItem("access_token", data.access_token);
-                showToast("Google Login Success", "Welcome back!", "check_circle");
-                await initAppState();
-                tabNavigation("dashboard");
-            } else {
-                const err = await response.json();
-                showToast("OAuth Failed", err.detail || "Could not log in via Google", "error");
+    if (!supabase) {
+        showToast("Error", "Supabase client not initialized (missing env config)", "error");
+        return;
+    }
+    
+    try {
+        showToast("Google Sign-In", "Redirecting to Google...", "insights");
+        const { error } = await supabase.auth.signInWithOAuth({
+            provider: 'google',
+            options: {
+                redirectTo: window.location.origin
             }
-        } catch (err) {
-            showToast("Error", "Could not connect to auth server", "error");
-            console.error(err);
-        }
-    }, 1200);
+        });
+        
+        if (error) throw error;
+    } catch (err) {
+        showToast("OAuth Failed", err.message || "Could not start Google Sign-In", "error");
+    }
 }
 
 
@@ -436,19 +462,36 @@ async function initAppState() {
             } else {
                 appState.holidays = [];
             }
+            
+            // Save state for offline caching
+            localStorage.setItem('offline_app_state', JSON.stringify(appState));
+            
             hideAuthScreen();
+            if (window.capacitorPushNotifications) registerPushNotifications();
         } else if (response.status === 401) {
             localStorage.removeItem("access_token");
             showAuthScreen();
             return;
         } else {
-            console.error("Failed to fetch state from backend, using defaults");
-            appState.attendanceLogs = generateMockAttendanceLogs();
+            console.error("Failed to fetch state from backend, attempting offline load");
+            const cached = localStorage.getItem('offline_app_state');
+            if (cached) {
+                Object.assign(appState, JSON.parse(cached));
+                showToast("Offline Mode", "Viewing cached data", "cloud_off");
+            } else {
+                appState.attendanceLogs = generateMockAttendanceLogs();
+            }
             hideAuthScreen();
         }
     } catch (e) {
-        console.error("Backend not reachable, using defaults", e);
-        appState.attendanceLogs = generateMockAttendanceLogs();
+        console.error("Backend not reachable, attempting offline load", e);
+        const cached = localStorage.getItem('offline_app_state');
+        if (cached) {
+            Object.assign(appState, JSON.parse(cached));
+            showToast("Offline Mode", "Viewing cached data", "cloud_off");
+        } else {
+            appState.attendanceLogs = generateMockAttendanceLogs();
+        }
         hideAuthScreen();
     }
 
@@ -492,9 +535,7 @@ async function saveStateToLocalStorage() {
                 timetable: appState.timetable
             })
         });
-        if (response.ok) {
-            console.log("Timetable synced with backend successfully");
-        } else {
+        if (!response.ok) {
             console.error("Failed to sync timetable with backend");
             showToast("Sync Failed", "Could not save timetable schedule changes to backend.", "error");
         }
@@ -3457,7 +3498,7 @@ function renderNotificationsList() {
     
     appState.notifications.forEach(n => {
         const item = document.createElement("div");
-        item.className = `p-3 rounded-xl border border-outline-variant/20 hover:bg-surface-container-high transition-colors cursor-pointer ${n.read ? 'opacity-60' : 'bg-primary/5 border-primary/20'}`;
+        item.className = `p-3 rounded-xl border border-outline-variant/20 hover:bg-surface-container-high transition-colors cursor-pointer flex-shrink-0 w-full ${n.read ? 'opacity-60' : 'bg-primary/5 border-primary/20'}`;
         
         let iconSymbol = "notifications";
         let iconColor = "text-primary";
@@ -3465,7 +3506,7 @@ function renderNotificationsList() {
         else if (n.type === "success") { iconSymbol = "check_circle"; iconColor = "text-secondary"; }
         
         item.innerHTML = `
-            <div class="flex items-start gap-2.5">
+            <div class="flex items-start gap-2.5 w-full">
                 <div class="w-7 h-7 rounded-full bg-surface-container-highest flex items-center justify-center flex-shrink-0 ${iconColor}">
                     <span class="material-symbols-outlined text-[16px]">${iconSymbol}</span>
                 </div>
@@ -4915,3 +4956,77 @@ window.handleForgotPassword = handleForgotPassword;
 window.handleResetPassword = handleResetPassword;
 window.handleGoogleSignIn = handleGoogleSignIn;
 
+
+// --- GLOBAL ERROR BOUNDARY ---
+window.addEventListener('error', function(e) {
+    console.error('Global Error Caught:', e.error || e.message);
+    if (!document.getElementById('global-error-toast')) {
+        showToast('App Error', 'An unexpected error occurred. Restarting app...', 'error');
+        setTimeout(() => location.reload(), 3000);
+    }
+});
+window.addEventListener('unhandledrejection', function(e) {
+    console.error('Unhandled Promise Rejection:', e.reason);
+    showToast('Network/App Error', 'Something went wrong. Please check connection.', 'warning');
+});
+
+// --- PUSH NOTIFICATIONS ---
+async function registerPushNotifications() {
+    try {
+        const { PushNotifications } = capacitorPushNotifications;
+        let permStatus = await PushNotifications.checkPermissions();
+        if (permStatus.receive === 'prompt') {
+            permStatus = await PushNotifications.requestPermissions();
+        }
+        if (permStatus.receive !== 'granted') {
+            throw new Error('User denied permissions!');
+        }
+        await PushNotifications.register();
+        
+        PushNotifications.addListener('registration', async (token) => {
+            const access_token = localStorage.getItem('access_token');
+            if (access_token) {
+                await fetch(API_BASE_URL + '/user/device-token', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + access_token
+                    },
+                    body: JSON.stringify({ token: token.value })
+                });
+            }
+        });
+        
+        PushNotifications.addListener('pushNotificationReceived', (notification) => {
+            addNotification(notification.title || "New Notification", notification.body || "", "info");
+        });
+    } catch (e) {
+        console.error("Push notification setup failed:", e);
+    }
+}
+window.registerPushNotifications = registerPushNotifications;
+
+if (supabase) {
+    supabase.auth.onAuthStateChange(async (event, session) => {
+        if (event === 'SIGNED_IN' && session) {
+            const email = session.user.email;
+            const name = session.user.user_metadata?.full_name || 'Google Student';
+            try {
+                const response = await fetch(API_BASE_URL + '/auth/google-login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, email })
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    localStorage.setItem('access_token', data.access_token);
+                    showToast('Google Login Success', 'Welcome back!', 'check_circle');
+                    await initAppState();
+                    tabNavigation('dashboard');
+                }
+            } catch (err) {
+                console.error('FastAPI google login sync failed:', err);
+            }
+        }
+    });
+}

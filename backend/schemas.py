@@ -244,3 +244,6 @@ class ExtraClassCreate(BaseModel):
     end_time: time
     room: Optional[str] = None
     session_type: Optional[str] = "Extra"
+
+class FCMTokenRequest(BaseModel):
+    token: str
