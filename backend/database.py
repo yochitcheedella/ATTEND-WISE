@@ -14,6 +14,9 @@ else:
 
 # Default to local SQLite in the project root if DATABASE_URL is not provided or is invalid
 SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "")
+if SQLALCHEMY_DATABASE_URL and SQLALCHEMY_DATABASE_URL.startswith("postgres://"):
+    SQLALCHEMY_DATABASE_URL = SQLALCHEMY_DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
 if not SQLALCHEMY_DATABASE_URL or SQLALCHEMY_DATABASE_URL.startswith("http://") or SQLALCHEMY_DATABASE_URL.startswith("https://"):
     project_root = os.path.dirname(backend_dir)
     db_path = os.path.join(project_root, "attendwise.db")

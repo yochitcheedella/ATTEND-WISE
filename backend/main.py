@@ -1,5 +1,8 @@
-from fastapi import FastAPI, Depends, HTTPException, status, File, UploadFile, Header
+from fastapi import FastAPI, Depends, HTTPException, status, File, UploadFile, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import date, time, timedelta
@@ -8,7 +11,8 @@ import base64
 import requests
 import json
 import math
-
+import secrets
+import hashlib
 
 from fastapi.security import OAuth2PasswordRequestForm
 from . import models, schemas, auth
@@ -17,7 +21,10 @@ from .database import engine, get_db
 # Create database tables
 models.Base.metadata.create_all(bind=engine)
 
-# Simple SQLite migration for minimum_required_attendance and academic_calendar columns
+# In-memory password reset token store: {token_hash: {email, expires_at}}
+_reset_tokens: dict = {}
+
+# SQLite migrations — add new columns safely
 from sqlalchemy import text
 try:
     with engine.begin() as conn:
@@ -25,19 +32,44 @@ try:
         columns = [row[1] for row in result.fetchall()]
         if "minimum_required_attendance" not in columns:
             conn.execute(text("ALTER TABLE subjects ADD COLUMN minimum_required_attendance FLOAT DEFAULT 75.0"))
-            
+        if "subject_type" not in columns:
+            conn.execute(text("ALTER TABLE subjects ADD COLUMN subject_type TEXT DEFAULT 'Theory'"))
+        if "weekly_classes" not in columns:
+            conn.execute(text("ALTER TABLE subjects ADD COLUMN weekly_classes INTEGER DEFAULT 4"))
+        if "total_planned_classes" not in columns:
+            conn.execute(text("ALTER TABLE subjects ADD COLUMN total_planned_classes INTEGER DEFAULT 40"))
+
         result_sem = conn.execute(text("PRAGMA table_info(semesters)"))
         columns_sem = [row[1] for row in result_sem.fetchall()]
         if "academic_calendar" not in columns_sem:
             conn.execute(text("ALTER TABLE semesters ADD COLUMN academic_calendar TEXT"))
+
+        result_usr = conn.execute(text("PRAGMA table_info(users)"))
+        user_cols = [row[1] for row in result_usr.fetchall()]
+        for col, coltype in [
+            ("roll_number", "TEXT"), 
+            ("section", "TEXT"), 
+            ("year", "TEXT"), 
+            ("profile_photo", "TEXT"),
+            ("register_number", "TEXT"),
+            ("university", "TEXT")
+        ]:
+            if col not in user_cols:
+                conn.execute(text(f"ALTER TABLE users ADD COLUMN {col} {coltype}"))
 except Exception as e:
     print("Migration warning:", e)
+
+# Rate limiter setup
+limiter = Limiter(key_func=get_remote_address)
 
 app = FastAPI(
     title="AttendWise API",
     description="Backend API for AttendWise AI-Powered Student Attendance Companion",
     version="1.0.0"
 )
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Configure CORS
 allowed_origins_str = os.getenv("ALLOWED_ORIGINS", "")
@@ -134,7 +166,7 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
     db_user = db.query(models.User).filter(models.User.email == user.email).first()
     if db_user:
         raise HTTPException(status_code=400, detail="Email already registered")
-    
+
     hashed_password = auth.get_password_hash(user.password)
     new_user = models.User(
         name=user.name,
@@ -143,6 +175,9 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
         college=user.college,
         branch=user.branch,
         semester=user.semester,
+        roll_number=user.roll_number,
+        section=user.section,
+        year=user.year,
         attendance_goal=user.attendance_goal
     )
     db.add(new_user)
@@ -151,7 +186,8 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
     return new_user
 
 @app.post("/auth/login", response_model=schemas.Token, tags=["Authentication"])
-def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def login_for_access_token(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = db.query(models.User).filter(models.User.email == form_data.username).first()
     if not user or not auth.verify_password(form_data.password, user.password_hash):
         raise HTTPException(
@@ -191,6 +227,9 @@ def update_subject(subject_id: int, subject_update: schemas.SubjectCreate, curre
     db_sub.credits = subject_update.credits
     db_sub.color = subject_update.color
     db_sub.minimum_required_attendance = subject_update.minimum_required_attendance
+    db_sub.subject_type = subject_update.subject_type
+    db_sub.weekly_classes = subject_update.weekly_classes
+    db_sub.total_planned_classes = subject_update.total_planned_classes
     
     db.commit()
     db.refresh(db_sub)
@@ -259,7 +298,7 @@ def _compute_streak(user_id: int, db: Session) -> int:
             models.Attendance.date == check_date
         ).all()
         
-        has_present = any(a.status.lower() == "present" for a in day_attendances)
+        has_present = any(a.status.lower() in ("present", "late_entry", "od", "event_leave", "medical_leave") for a in day_attendances)
         has_absent = any(a.status.lower() == "absent" for a in day_attendances)
         
         # Check if it's a meaningful class day: has at least one present/absent record
@@ -280,14 +319,25 @@ def _compute_streak(user_id: int, db: Session) -> int:
     
     return streak
 
+
+def _get_attendance_weight(att: models.Attendance, subject_map: dict = None) -> int:
+    # If the subject is a lab/practical, weight = 3, else 1
+    if subject_map and att.subject_id in subject_map:
+        sub = subject_map[att.subject_id]
+        if sub.subject_type.lower() == 'practical' or 'lab' in sub.name.lower():
+            return 3
+    return 1
+
 def _compute_global_stats(user_id: int, db: Session):
     """Compute overall attendance stats across all subjects."""
     attendances = db.query(models.Attendance).filter(
         models.Attendance.user_id == user_id
     ).all()
+    subjects = db.query(models.Subject).filter(models.Subject.user_id == user_id).all()
+    sub_map = {s.id: s for s in subjects}
     
-    present = sum(1 for a in attendances if a.status.lower() == "present")
-    absent = sum(1 for a in attendances if a.status.lower() == "absent")
+    present = sum(_get_attendance_weight(a, sub_map) for a in attendances if a.status.lower() in ("present", "late_entry", "od", "event_leave", "medical_leave"))
+    absent = sum(_get_attendance_weight(a, sub_map) for a in attendances if a.status.lower() == "absent")
     total = present + absent
     percentage = round((present / total * 100), 2) if total > 0 else 0.0
     
@@ -354,8 +404,10 @@ def get_detailed_analytics(current_user: models.User = Depends(auth.get_current_
             models.Attendance.date <= week_end
         ).all()
         
-        p = sum(1 for a in week_attendances if a.status.lower() == "present")
-        total = sum(1 for a in week_attendances if a.status.lower() in ("present", "absent"))
+        subjects = db.query(models.Subject).filter(models.Subject.user_id == user_id).all()
+        sub_map = {s.id: s for s in subjects}
+        p = sum(_get_attendance_weight(a, sub_map) for a in week_attendances if a.status.lower() in ("present", "late_entry", "od", "event_leave", "medical_leave"))
+        total = sum(_get_attendance_weight(a, sub_map) for a in week_attendances if a.status.lower() in ("present", "late_entry", "od", "event_leave", "medical_leave", "absent"))
         pct = round(p / total * 100, 1) if total > 0 else 0.0
         weekly_trend.append(pct)
     
@@ -371,9 +423,9 @@ def get_detailed_analytics(current_user: models.User = Depends(auth.get_current_
     date_stats = defaultdict(lambda: {"present": 0, "total": 0})
     for a in heatmap_attendances:
         d = a.date.isoformat()
-        if a.status.lower() in ("present", "absent"):
+        if a.status.lower() in ("present", "late_entry", "od", "event_leave", "medical_leave", "absent"):
             date_stats[d]["total"] += 1
-        if a.status.lower() == "present":
+        if a.status.lower() in ("present", "late_entry", "od", "event_leave", "medical_leave"):
             date_stats[d]["present"] += 1
     
     heatmap = {}
@@ -400,8 +452,9 @@ def get_detailed_analytics(current_user: models.User = Depends(auth.get_current_
     subject_stats = {}
     for sub in subjects:
         sub_atts = [a for a in all_attendances if a.subject_id == sub.id]
-        p = sum(1 for a in sub_atts if a.status.lower() == "present")
-        ab = sum(1 for a in sub_atts if a.status.lower() == "absent")
+        sub_map = {sub.id: sub}
+        p = sum(_get_attendance_weight(a, sub_map) for a in sub_atts if a.status.lower() in ("present", "late_entry", "od", "event_leave", "medical_leave"))
+        ab = sum(_get_attendance_weight(a, sub_map) for a in sub_atts if a.status.lower() == "absent")
         total = p + ab
         pct = round(p / total * 100, 1) if total > 0 else 0.0
         subject_stats[sub.name] = {
@@ -496,9 +549,64 @@ def update_profile(profile: schemas.UserUpdate, current_user: models.User = Depe
     current_user.name = profile.name
     current_user.attendance_goal = profile.attendance_goal
     current_user.semester = profile.semester
+    current_user.college = profile.college
+    current_user.branch = profile.branch
+    current_user.roll_number = profile.roll_number
+    current_user.section = profile.section
+    current_user.year = profile.year
+    current_user.register_number = profile.register_number
+    current_user.university = profile.university
+    current_user.profile_photo = profile.profile_photo
     db.commit()
     db.refresh(current_user)
     return {"message": "Profile updated successfully"}
+
+# --- Change Password ---
+@app.post("/auth/change-password", tags=["Authentication"])
+def change_password(req: schemas.ChangePasswordRequest, current_user: models.User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    if not auth.verify_password(req.current_password, current_user.password_hash):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    current_user.password_hash = auth.get_password_hash(req.new_password)
+    db.commit()
+    return {"message": "Password changed successfully"}
+
+# --- Forgot Password (console-logged token for dev; swap for email in production) ---
+@app.post("/auth/forgot-password", tags=["Authentication"])
+def forgot_password(body: dict, db: Session = Depends(get_db)):
+    from datetime import datetime
+    email = body.get("email", "").strip().lower()
+    user = db.query(models.User).filter(models.User.email == email).first()
+    # Always return 200 to prevent email enumeration
+    if user:
+        raw_token = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+        expires_at = datetime.utcnow() + timedelta(minutes=15)
+        _reset_tokens[token_hash] = {"email": email, "expires_at": expires_at}
+        # In production: send email. In dev: log to console.
+        print(f"\n[DEV] Password reset token for {email}: {raw_token}\n")
+    return {"message": "If that email is registered, a reset link has been sent (check server console in dev mode)"}
+
+@app.post("/auth/reset-password", tags=["Authentication"])
+def reset_password(body: dict, db: Session = Depends(get_db)):
+    from datetime import datetime
+    token = body.get("token", "").strip()
+    new_password = body.get("new_password", "")
+    if len(new_password) < 8 or not any(c.isdigit() for c in new_password):
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters and contain a number")
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    entry = _reset_tokens.get(token_hash)
+    if not entry:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
+    if datetime.utcnow() > entry["expires_at"]:
+        del _reset_tokens[token_hash]
+        raise HTTPException(status_code=400, detail="Reset token has expired")
+    user = db.query(models.User).filter(models.User.email == entry["email"]).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.password_hash = auth.get_password_hash(new_password)
+    db.commit()
+    del _reset_tokens[token_hash]
+    return {"message": "Password reset successfully"}
 
 # --- Timetable Sync ---
 @app.post("/timetable/sync", tags=["App"])
@@ -533,6 +641,7 @@ def sync_timetable(req: schemas.TimetableSyncRequest, current_user: models.User 
                 code="CS-" + str(random.randint(100, 999)),
                 prof=entry.prof,
                 color=color,
+                subject_type="Practical" if "lab" in entry.subject.lower() or "practical" in entry.subject.lower() or entry.type.lower() == "practical" else "Theory",
                 credits=3
             )
             db.add(subject)
@@ -610,7 +719,7 @@ def get_report_summary(
     sub_map = {s.id: s for s in subjects}
     
     # Overall stats
-    present = sum(1 for a in attendances if a.status.lower() == "present")
+    present = sum(1 for a in attendances if a.status.lower() in ("present", "late_entry", "od", "event_leave", "medical_leave"))
     absent = sum(1 for a in attendances if a.status.lower() == "absent")
     cancelled = sum(1 for a in attendances if a.status.lower() == "cancelled")
     holidays = sum(1 for a in attendances if a.status.lower() == "holiday")
@@ -621,7 +730,7 @@ def get_report_summary(
     subject_breakdown = []
     for sub in subjects:
         sub_atts = [a for a in attendances if a.subject_id == sub.id]
-        s_present = sum(1 for a in sub_atts if a.status.lower() == "present")
+        s_present = sum(1 for a in sub_atts if a.status.lower() in ("present", "late_entry", "od", "event_leave", "medical_leave"))
         s_absent = sum(1 for a in sub_atts if a.status.lower() == "absent")
         s_total = s_present + s_absent
         s_pct = round((s_present / s_total * 100), 2) if s_total > 0 else 0.0
@@ -788,14 +897,24 @@ def get_state(current_user: models.User = Depends(auth.get_current_user), db: Se
             "color": sub_map[a.subject_id].color if a.subject_id in sub_map else "#7c4dff"
         })
 
+    holidays = db.query(models.Holiday).filter(models.Holiday.user_id == user_id).all()
+    holidays_data = [{"date": h.date.isoformat(), "name": h.name, "type": h.type} for h in holidays]
     return {
+        "holidays": holidays_data,
         "profile": {
             "name": user.name,
+            "email": user.email,
             "targetGoal": user.attendance_goal,
             "term": user.semester,
             "streak": streak,
             "college": user.college,
-            "branch": user.branch
+            "branch": user.branch,
+            "roll_number": user.roll_number,
+            "section": user.section,
+            "year": user.year,
+            "register_number": user.register_number,
+            "university": user.university,
+            "profile_photo": user.profile_photo,
         },
         "active_semester": {
             "id": active_semester.id,
@@ -832,10 +951,22 @@ def get_streak(current_user: models.User = Depends(auth.get_current_user), db: S
     streak = _compute_streak(current_user.id, db)
     return {"streak": streak}
 
+def _normalize_date_str(s: str) -> str:
+    """Normalize DD-MM-YYYY or D-M-YYYY to YYYY-MM-DD for fromisoformat."""
+    if not s:
+        return s
+    s = s.strip()
+    import re as _re
+    m = _re.match(r'^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$', s)
+    if m:
+        d, mo, y = m.group(1), m.group(2), m.group(3)
+        return f"{y}-{mo.zfill(2)}-{d.zfill(2)}"
+    return s
+
 def _expand_date_range(start_str: str, end_str: str) -> List[date]:
     try:
-        start_d = date.fromisoformat(start_str)
-        end_d = date.fromisoformat(end_str)
+        start_d = date.fromisoformat(_normalize_date_str(start_str))
+        end_d = date.fromisoformat(_normalize_date_str(end_str))
         curr = start_d
         res = []
         while curr <= end_d:
@@ -851,10 +982,13 @@ def create_semester(
     current_user: models.User = Depends(auth.get_current_user),
     db: Session = Depends(get_db)
 ):
-    db.query(models.Semester).filter(models.Semester.user_id == current_user.id).update({"is_active": False})
-    
+    # Capture plain integers BEFORE any commit (ORM objects get expired after commit)
+    user_id = int(current_user.id)
+
+    db.query(models.Semester).filter(models.Semester.user_id == user_id).update({"is_active": False})
+
     db_sem = models.Semester(
-        user_id=current_user.id,
+        user_id=user_id,
         name=sem.name,
         academic_year=sem.academic_year,
         start_date=sem.start_date,
@@ -865,104 +999,80 @@ def create_semester(
     db.add(db_sem)
     db.commit()
     db.refresh(db_sem)
-    
-    # Populate Holidays from Academic Calendar if present (Checklist Section 1.6)
+
+    # Capture sem_id as plain integer after refresh
+    sem_id = int(db_sem.id)
+
+    # Populate Holidays using raw SQL INSERT OR IGNORE to safely skip duplicates
     if sem.academic_calendar:
         try:
             cal = json.loads(sem.academic_calendar)
-            
-            # 1. Standard Holidays
+
+            # Collect all (date, name, type) tuples to insert
+            rows = []
+
+            def _collect(hdate, hname, htype):
+                if hdate:
+                    rows.append((str(hdate), hname, htype))
+
             for h in cal.get("holidays", []):
-                h_date = date.fromisoformat(h["date"])
-                db_hol = models.Holiday(
-                    user_id=current_user.id,
-                    semester_id=db_sem.id,
-                    date=h_date,
-                    name=h.get("name", "Holiday"),
-                    type="Holiday"
-                )
-                db.merge(db_hol)
-                
-            # 2. Mid Exams
+                try:
+                    _collect(date.fromisoformat(h["date"]), h.get("name", "Holiday"), "Holiday")
+                except Exception:
+                    pass
+
             for m in cal.get("midExams", []):
-                for d in _expand_date_range(m["start"], m["end"]):
-                    db_hol = models.Holiday(
-                        user_id=current_user.id,
-                        semester_id=db_sem.id,
-                        date=d,
-                        name=m.get("title", "Mid Exams"),
-                        type="Mid Exam"
-                    )
-                    db.merge(db_hol)
+                for d in _expand_date_range(m.get("start", ""), m.get("end", "")):
+                    _collect(d, m.get("title", "Mid Exams"), "Mid Exam")
 
-            # 3. Lab Exams
             for l in cal.get("labExams", []):
-                for d in _expand_date_range(l["start"], l["end"]):
-                    db_hol = models.Holiday(
-                        user_id=current_user.id,
-                        semester_id=db_sem.id,
-                        date=d,
-                        name=l.get("title", "Lab Exams"),
-                        type="Lab Exam"
-                    )
-                    db.merge(db_hol)
-                    
-            # 4. Semester Breaks
+                for d in _expand_date_range(l.get("start", ""), l.get("end", "")):
+                    _collect(d, l.get("title", "Lab Exams"), "Lab Exam")
+
             for b in cal.get("semesterBreak", []):
-                for d in _expand_date_range(b["start"], b["end"]):
-                    db_hol = models.Holiday(
-                        user_id=current_user.id,
-                        semester_id=db_sem.id,
-                        date=d,
-                        name=b.get("title", "Semester Break"),
-                        type="Semester Break"
-                    )
-                    db.merge(db_hol)
-                    
-            # 5. Final Exams
+                for d in _expand_date_range(b.get("start", ""), b.get("end", "")):
+                    _collect(d, b.get("title", "Semester Break"), "Semester Break")
+
             for e in cal.get("examDates", []):
-                for d in _expand_date_range(e["start"], e["end"]):
-                    db_hol = models.Holiday(
-                        user_id=current_user.id,
-                        semester_id=db_sem.id,
-                        date=d,
-                        name=e.get("title", "Semester Exams"),
-                        type="Semester Exam"
-                    )
-                    db.merge(db_hol)
+                for d in _expand_date_range(e.get("start", ""), e.get("end", "")):
+                    _collect(d, e.get("title", "Semester Exams"), "Semester Exam")
 
-            # 6. Study Holidays
             for s in cal.get("studyHolidays", []):
-                for d in _expand_date_range(s["start"], s["end"]):
-                    db_hol = models.Holiday(
-                        user_id=current_user.id,
-                        semester_id=db_sem.id,
-                        date=d,
-                        name=s.get("title", "Preparation Leave"),
-                        type="Study Holiday"
-                    )
-                    db.merge(db_hol)
+                for d in _expand_date_range(s.get("start", ""), s.get("end", "")):
+                    _collect(d, s.get("title", "Preparation Leave"), "Study Holiday")
 
-            # 7. Events (like Sports Day)
             for ev in cal.get("events", []):
-                ev_date = date.fromisoformat(ev["date"])
-                db_hol = models.Holiday(
-                    user_id=current_user.id,
-                    semester_id=db_sem.id,
-                    date=ev_date,
-                    name=ev.get("title", "College Event"),
-                    type="Event"
+                try:
+                    _collect(date.fromisoformat(ev["date"]), ev.get("title", "College Event"), "Event")
+                except Exception:
+                    pass
+
+            # Bulk insert with raw SQL INSERT OR IGNORE to skip any duplicates silently
+            if rows:
+                db.execute(
+                    text(
+                        "INSERT OR IGNORE INTO holidays (user_id, semester_id, date, name, type) "
+                        "VALUES (:uid, :sid, :dt, :nm, :tp)"
+                    ),
+                    [{"uid": user_id, "sid": sem_id, "dt": r[0], "nm": r[1], "tp": r[2]} for r in rows]
                 )
-                db.merge(db_hol)
-                
-            db.commit()
+                db.commit()
+
         except Exception as err:
-            print("Failed to auto-populate holidays from calendar:", err)
-            
+            db.rollback()
+            print("Warning: Could not auto-populate holidays:", err)
+
     # Generate scheduled class sessions
-    _generate_sessions_for_active_semester(db, current_user.id)
-    
+    try:
+        _generate_sessions_for_active_semester(db, user_id)
+    except Exception as sess_err:
+        db.rollback()
+        print("Warning: Could not auto-generate sessions:", sess_err)
+
+    # Re-fetch db_sem so it's in a clean state to return
+    db_sem = db.query(models.Semester).filter(models.Semester.id == sem_id).first()
     return db_sem
+
 
 @app.get("/semesters", response_model=List[schemas.SemesterOut], tags=["Semesters"])
 def get_semesters(
@@ -1309,6 +1419,7 @@ def create_timetable_version(
                 code="CS-" + str(random.randint(100, 999)),
                 prof=entry.prof,
                 color=color,
+                subject_type="Practical" if "lab" in entry.subject.lower() or "practical" in entry.subject.lower() or entry.type.lower() == "practical" else "Theory",
                 credits=3
             )
             db.add(subject)
@@ -1411,6 +1522,7 @@ def mark_class_session(
         
     if att:
         att.status = req.status
+        att.remarks = req.remarks
         att.session_id = s.id
     else:
         att = models.Attendance(
@@ -1418,6 +1530,7 @@ def mark_class_session(
             subject_id=s.subject_id,
             date=s.date,
             status=req.status,
+            remarks=req.remarks,
             session_id=s.id
         )
         db.add(att)
@@ -1508,19 +1621,26 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL   = "gemini-2.5-flash"
 GEMINI_URL     = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
 
-TIMETABLE_OCR_PROMPT = """You are an expert academic timetable parser.
-Analyze the provided timetable image or PDF and extract ALL class entries.
+TIMETABLE_OCR_PROMPT = """You are an expert Indian engineering college timetable parser.
+Analyze the provided timetable image and extract ALL class/lab entries for every day.
+
+IMPORTANT RULES FOR INDIAN TIMETABLES:
+1. Subject codes (abbreviations) like CO, CN, EDA, AI, OE must be resolved to full names using the subject legend/list table if present in the image. Always prefer the full name.
+2. Lab sessions spanning multiple periods (e.g. "Tinkering Lab" across periods 2-3-4) should be ONE entry with start time = first period start, end time = last period end.
+3. "Mentoring/Seminar", "Mentor", "Seminar" entries are valid classes — include them as type "Tutorial".
+4. "BREAK" or "Recess" columns are lunch/tea breaks — include as type "Break" with subject "Break".
+5. Period timings: If the image shows period numbers with times, map period → time carefully.
 
 Return ONLY a valid JSON object (no markdown, no explanation) with this exact structure:
 {
   "timetable": [
     {
       "day": "Mon",
-      "subject": "Subject Name",
+      "subject": "Full Subject Name",
       "start": "09:00",
-      "end": "10:30",
-      "room": "Room 101",
-      "prof": "Prof. Name",
+      "end": "09:50",
+      "room": "",
+      "prof": "",
       "type": "Lecture"
     }
   ],
@@ -1531,10 +1651,12 @@ Return ONLY a valid JSON object (no markdown, no explanation) with this exact st
 Rules:
 - day must be one of: Mon, Tue, Wed, Thu, Fri, Sat
 - start and end must be in HH:MM 24-hour format (e.g. 09:00, 14:30)
-- type must be one of: Lecture, Practical, Hybrid, Tutorial, Break
+- type must be one of: Lecture, Practical, Tutorial, Break
 - If room or prof is not visible, use empty string ""
-- If a cell is empty or Free, skip it
-- Return every detected class entry, including lab sessions (usually marked as Practical/Lab) and breaks (like recess, lunch, tea breaks, which should have type: "Break" and subject: "Break" or "Lunch Break").
+- If a cell is empty or "Free", skip it
+- Resolve ALL subject abbreviations to full names using the legend table in the image
+- For labs spanning multiple consecutive periods, create ONE entry covering the full time range (type: "Practical")
+- Include every day including Saturday if present
 """
 
 @app.post("/timetable/ocr", tags=["Timetable"])
@@ -1553,12 +1675,21 @@ async def ocr_timetable(
             detail="Gemini API key not configured. Set GEMINI_API_KEY in your .env file."
         )
 
+    # File size validation (max 10MB)
     file_bytes = await file.read()
-    encoded = base64.b64encode(file_bytes).decode("utf-8")
+    MAX_FILE_SIZE = 10 * 1024 * 1024
+    if len(file_bytes) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=413, detail="File too large. Maximum size is 10MB.")
 
+    # File type validation
+    ALLOWED_MIME_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif", "application/pdf"}
     mime_type = file.content_type or "image/png"
     if file.filename and file.filename.lower().endswith(".pdf"):
         mime_type = "application/pdf"
+    if mime_type not in ALLOWED_MIME_TYPES:
+        raise HTTPException(status_code=415, detail=f"Unsupported file type: {mime_type}. Allowed: PNG, JPEG, WebP, PDF.")
+
+    encoded = base64.b64encode(file_bytes).decode("utf-8")
 
     payload = {
         "contents": [
@@ -1597,7 +1728,7 @@ async def ocr_timetable(
                 headers=headers,
                 method="POST"
             )
-            with ureq.urlopen(req, timeout=120) as resp:
+            with ureq.urlopen(req, timeout=30) as resp:
                 gemini_response = json.loads(resp.read().decode("utf-8"))
                 successful_model = model
                 break
@@ -1663,8 +1794,10 @@ async def ocr_timetable(
         print("GEMINI ERROR:", error_msg)
         raise HTTPException(status_code=500, detail=f"Gemini OCR failed: {error_msg}")
 
-CALENDAR_OCR_PROMPT = """You are an expert academic calendar parser.
+CALENDAR_OCR_PROMPT = """You are an expert Indian academic calendar parser for engineering colleges.
 Analyze the provided academic calendar image or PDF and extract ALL key dates and events.
+
+IMPORTANT: Always convert dates to YYYY-MM-DD format regardless of how they appear in the image (e.g. 29-06-2026 → 2026-06-29).
 
 Return ONLY a valid JSON object (no markdown, no explanations) with this exact structure:
 {
@@ -1674,36 +1807,39 @@ Return ONLY a valid JSON object (no markdown, no explanations) with this exact s
     {"date": "YYYY-MM-DD", "name": "Name of holiday"}
   ],
   "midExams": [
-    {"title": "Mid Exams", "start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
+    {"title": "I Mid Examinations", "start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
   ],
   "labExams": [
     {"title": "Lab Exams", "start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
   ],
   "semesterBreak": [
-    {"title": "Break", "start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
+    {"title": "Dasara Holidays", "start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
   ],
   "examDates": [
-    {"title": "Semester Exams", "start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
+    {"title": "End Examinations", "start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
   ],
   "studyHolidays": [
-    {"title": "Preparation Leave", "start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
+    {"title": "Practical Examinations & Preparation", "start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
   ],
-  "workingSaturdays": [
-    "YYYY-MM-DD"
-  ],
+  "workingSaturdays": ["YYYY-MM-DD"],
   "events": [
     {"title": "Sports Day", "date": "YYYY-MM-DD"}
   ]
 }
 
-Rules:
-- All dates must be in YYYY-MM-DD format.
-- semesterStart and semesterEnd represent the absolute date boundaries of the academic semester.
-- Extract any public/national holidays, college holidays, festivals, or local holidays into "holidays".
-- Extract exam schedules (Mid Term, Lab, Practical, End Semester, Preparatory Leave/Study Holidays) into their corresponding arrays.
-- Extract semester breaks/holidays (e.g. Winter/Summer vacations, Puja holidays).
-- Extract Special Working Saturdays (where Monday or normal classes run) into "workingSaturdays".
-- Extract any college events (Sports Day, Annual Fest, Project review days) into "events" with title and date.
+Categorization Rules for Indian Engineering College Calendars:
+- semesterStart: The "Commencement of Class Work" date
+- semesterEnd: The last date of "End Examinations" / "Semester Examinations"
+- midExams: Any row containing "Mid Examination", "Unit Test", "Internal Exam" — extract start and end dates
+- labExams: "Lab Examination" or "Practical Examination" periods that are clearly lab/practical exams
+- semesterBreak: Festival holidays like "Dasara", "Dussehra", "Puja Holidays", "Diwali Holidays", "Christmas Holidays", "Winter Break", "Summer Break"
+- examDates: "End Examination", "Semester Examination", "Final Examination" periods
+- studyHolidays: "Practical Examinations & Preparation", "Preparation Leave", "Study Holidays", "Pre-Exam Holiday" — these are days before end exams
+- holidays: Individual public holidays, national holidays (Independence Day, Republic Day, etc.)
+- workingSaturdays: Explicitly mentioned as "Special Working Saturday" or similar
+- events: College fests, sports days, annual day events
+
+All dates MUST be in YYYY-MM-DD format. Convert from DD-MM-YYYY if needed.
 """
 
 @app.post("/semester/parse-calendar", tags=["Semesters"])
@@ -1796,6 +1932,361 @@ async def parse_calendar(
         raise HTTPException(status_code=500, detail=f"Failed to parse Gemini JSON response: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Gemini calendar parsing failed: {str(e)}")
+
+# --- Additional Features Endpoints ---
+
+@app.post("/auth/google-login", response_model=schemas.Token, tags=["Authentication"])
+def google_login(body: dict, db: Session = Depends(get_db)):
+    email = body.get("email")
+    name = body.get("name")
+    if not email or not name:
+        raise HTTPException(status_code=400, detail="Invalid google token payload")
+    
+    user = db.query(models.User).filter(models.User.email == email).first()
+    if not user:
+        user = models.User(
+            name=name,
+            email=email,
+            password_hash="",  # Empty password for Google OAuth
+            college="Google University",
+            branch="Computer Science",
+            semester="Semester 1 (Autumn)",
+            attendance_goal=75.0
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+    
+    access_token_expires = auth.timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = auth.create_access_token(
+        data={"sub": user.email}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+from fastapi.responses import StreamingResponse
+import io
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+
+@app.get("/reports/excel", tags=["Reports"])
+def export_report_excel(
+    period: str = "monthly",
+    start_date: str = None,
+    end_date: str = None,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db)
+):
+    # Fetch report data (reuse local summary logic)
+    report = get_report_summary(period, start_date, end_date, current_user, db)
+    
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Attendance Report"
+    
+    # Enable grid lines
+    ws.views.sheetView[0].showGridLines = True
+    
+    # Styles
+    title_font = Font(name="Arial", size=16, bold=True, color="FFFFFF")
+    header_font = Font(name="Arial", size=11, bold=True, color="FFFFFF")
+    bold_font = Font(name="Arial", size=10, bold=True)
+    regular_font = Font(name="Arial", size=10)
+    
+    purple_fill = PatternFill(start_color="7C4DFF", end_color="7C4DFF", fill_type="solid")
+    dark_gray_fill = PatternFill(start_color="333333", end_color="333333", fill_type="solid")
+    light_gray_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+    
+    thin_border = Border(
+        left=Side(style='thin', color='D3D3D3'),
+        right=Side(style='thin', color='D3D3D3'),
+        top=Side(style='thin', color='D3D3D3'),
+        bottom=Side(style='thin', color='D3D3D3')
+    )
+    
+    # Title Row
+    ws.merge_cells("A1:F2")
+    title_cell = ws["A1"]
+    title_cell.value = "AttendWise Attendance Report"
+    title_cell.font = title_font
+    title_cell.fill = purple_fill
+    title_cell.alignment = Alignment(horizontal="center", vertical="center")
+    
+    # Info block
+    ws["A4"] = "Student Name:"
+    ws["A4"].font = bold_font
+    ws["B4"] = report["student"]["name"]
+    ws["B4"].font = regular_font
+    
+    ws["D4"] = "College:"
+    ws["D4"].font = bold_font
+    ws["E4"] = report["student"]["college"] or "N/A"
+    ws["E4"].font = regular_font
+    
+    ws["A5"] = "Branch/Branch:"
+    ws["A5"].font = bold_font
+    ws["B5"] = report["student"]["branch"] or "N/A"
+    ws["B5"].font = regular_font
+    
+    ws["D5"] = "Semester:"
+    ws["D5"].font = bold_font
+    ws["E5"] = report["student"]["semester"] or "N/A"
+    ws["E5"].font = regular_font
+    
+    ws["A6"] = "Period:"
+    ws["A6"].font = bold_font
+    ws["B6"] = f"{report['start_date']} to {report['end_date']}"
+    ws["B6"].font = regular_font
+    
+    ws["D6"] = "Target Goal:"
+    ws["D6"].font = bold_font
+    ws["E6"] = f"{report['student']['target_goal']}%"
+    ws["E6"].font = regular_font
+    
+    # Table Header
+    headers = ["Subject Name", "Subject Code", "Classes Attended", "Classes Missed", "Total Conducted", "Attendance %"]
+    for col_idx, h in enumerate(headers, 1):
+        cell = ws.cell(row=8, column=col_idx)
+        cell.value = h
+        cell.font = header_font
+        cell.fill = dark_gray_fill
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        cell.border = thin_border
+    
+    # Table Data
+    start_row = 9
+    for idx, sub in enumerate(report["subjects"]):
+        row_idx = start_row + idx
+        ws.cell(row=row_idx, column=1, value=sub["name"]).font = regular_font
+        ws.cell(row=row_idx, column=2, value=sub["code"] or "N/A").font = regular_font
+        ws.cell(row=row_idx, column=3, value=sub["present"]).font = regular_font
+        ws.cell(row=row_idx, column=4, value=sub["absent"]).font = regular_font
+        ws.cell(row=row_idx, column=5, value=sub["total"]).font = regular_font
+        ws.cell(row=row_idx, column=6, value=f"{sub['percentage']}%").font = regular_font
+        
+        for col_idx in range(1, 7):
+            cell = ws.cell(row=row_idx, column=col_idx)
+            cell.border = thin_border
+            if idx % 2 == 1:
+                cell.fill = light_gray_fill
+            if col_idx >= 3:
+                cell.alignment = Alignment(horizontal="right")
+    
+    # Overall summary row
+    summary_row = start_row + len(report["subjects"]) + 1
+    ws.cell(row=summary_row, column=1, value="OVERALL SUMMARY").font = bold_font
+    ws.cell(row=summary_row, column=3, value=report["overall"]["present"]).font = bold_font
+    ws.cell(row=summary_row, column=4, value=report["overall"]["absent"]).font = bold_font
+    ws.cell(row=summary_row, column=5, value=report["overall"]["total_conducted"]).font = bold_font
+    ws.cell(row=summary_row, column=6, value=f"{report['overall']['percentage']}%").font = bold_font
+    
+    for col_idx in range(1, 7):
+        cell = ws.cell(row=summary_row, column=col_idx)
+        cell.border = thin_border
+        cell.fill = light_gray_fill
+        if col_idx >= 3:
+            cell.alignment = Alignment(horizontal="right")
+            
+    # Auto-fit columns
+    for col in ws.columns:
+        max_len = 0
+        col_letter = col[0].column_letter
+        for cell in col:
+            if cell.value:
+                max_len = max(max_len, len(str(cell.value)))
+        ws.column_dimensions[col_letter].width = max(max_len + 3, 12)
+        
+    out = io.BytesIO()
+    wb.save(out)
+    out.seek(0)
+    
+    filename = f"AttendWise_Report_{period}.xlsx"
+    return StreamingResponse(
+        out,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+@app.get("/analytics/ai-insights", tags=["Analytics"])
+def get_ai_insights(current_user: models.User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    # 1. Fetch current subject stats
+    subjects = db.query(models.Subject).filter(models.Subject.user_id == current_user.id).all()
+    attendances = db.query(models.Attendance).filter(models.Attendance.user_id == current_user.id).all()
+    
+    sub_summary = []
+    for sub in subjects:
+        sub_atts = [a for a in attendances if a.subject_id == sub.id]
+        p = sum(1 for a in sub_atts if a.status.lower() in ("present", "late_entry", "od", "event_leave", "medical_leave"))
+        ab = sum(1 for a in sub_atts if a.status.lower() == "absent")
+        total = p + ab
+        pct = round(p / total * 100, 1) if total > 0 else 0.0
+        sub_summary.append(f"- {sub.name} ({sub.code or ''}): {p} Present, {ab} Absent ({pct}%)")
+        
+    sub_summary_str = "\n".join(sub_summary)
+    
+    prompt = f"""You are AttendWise AI, a student attendance companion.
+The student "{current_user.name}" has the following attendance record:
+{sub_summary_str}
+
+Overall Attendance Goal: {current_user.attendance_goal}%
+
+Analyze their attendance and return a JSON object (no explanations, no markdown block) with these exact fields:
+{{
+  "recommendations": ["A list of 3-4 specific smart recommendations, e.g. 'Attend next 4 Operating Systems classes', 'You can safely miss 2 Mathematics lectures.'"],
+  "risk_analysis": "A brief analysis of their risk of falling below target.",
+  "study_suggestions": ["A list of 2-3 suggestions to balance study time with attendance requirements."],
+  "general_insight": "A short summary sentence like 'You are safe until next Tuesday.'"
+}}
+"""
+    
+    api_key = os.getenv("GEMINI_API_KEY", GEMINI_API_KEY)
+    if not api_key:
+        return {
+            "recommendations": [
+                "Attend next 3 class periods to keep your streak active.",
+                "Ensure your lab attendance is above 75% before mid-terms."
+            ],
+            "risk_analysis": "Your attendance is stable, but keep monitoring low-percentage subjects.",
+            "study_suggestions": [
+                "Utilize weekends to catch up on labs you bunked.",
+                "Review class notes for classes marked absent."
+            ],
+            "general_insight": "You are currently on track to hit your overall goal."
+        }
+        
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "response_mime_type": "application/json",
+            "temperature": 0.2
+        }
+    }
+    
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={api_key}"
+    headers = {"Content-Type": "application/json"}
+    
+    try:
+        resp = requests.post(url, headers=headers, json=payload, timeout=15)
+        if resp.status_code == 200:
+            gemini_response = resp.json()
+            candidates = gemini_response.get("candidates", [])
+            if candidates:
+                raw_text = candidates[0]["content"]["parts"][0]["text"]
+                return json.loads(raw_text)
+    except Exception as e:
+        print("Gemini insights generation failed:", e)
+        
+    return {
+        "recommendations": [
+            "Attend next 3 class periods to keep your streak active.",
+            "Ensure your lab attendance is above 75% before mid-terms."
+        ],
+        "risk_analysis": "Your attendance is stable, but keep monitoring low-percentage subjects.",
+        "study_suggestions": [
+            "Utilize weekends to catch up on labs you bunked.",
+            "Review class notes for classes marked absent."
+        ],
+        "general_insight": "You are currently on track to hit your overall goal."
+    }
+
+@app.post("/state/restore", tags=["App"])
+def restore_state(body: dict, current_user: models.User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    user_id = current_user.id
+    
+    subjects = body.get("subjects", [])
+    timetable = body.get("timetable", [])
+    attendance_logs = body.get("attendanceLogs", {})
+    profile = body.get("profile", {})
+    
+    if profile:
+        current_user.name = profile.get("name", current_user.name)
+        current_user.attendance_goal = profile.get("targetGoal", current_user.attendance_goal)
+        current_user.semester = profile.get("term", current_user.semester)
+        current_user.college = profile.get("college", current_user.college)
+        current_user.branch = profile.get("branch", current_user.branch)
+        current_user.roll_number = profile.get("roll_number", current_user.roll_number)
+        current_user.section = profile.get("section", current_user.section)
+        current_user.year = profile.get("year", current_user.year)
+        current_user.register_number = profile.get("register_number", current_user.register_number)
+        current_user.university = profile.get("university", current_user.university)
+        
+    db.query(models.Attendance).filter(models.Attendance.user_id == user_id).delete()
+    db.query(models.Timetable).filter(models.Timetable.user_id == user_id).delete()
+    db.query(models.Subject).filter(models.Subject.user_id == user_id).delete()
+    db.commit()
+    
+    sub_name_to_id = {}
+    for sub in subjects:
+        db_sub = models.Subject(
+            user_id=user_id,
+            name=sub["name"],
+            code=sub.get("code"),
+            prof=sub.get("prof"),
+            credits=sub.get("credits", 3),
+            color=sub.get("color", "#7c4dff"),
+            minimum_required_attendance=sub.get("minimum_required_attendance", 75.0),
+            subject_type="Practical" if "lab" in sub["name"].lower() or "practical" in sub["name"].lower() else sub.get("subject_type", "Theory"),
+            weekly_classes=sub.get("weekly_classes", 4),
+            total_planned_classes=sub.get("total_planned_classes", 40)
+        )
+        db.add(db_sub)
+        db.commit()
+        db.refresh(db_sub)
+        sub_name_to_id[sub["name"]] = db_sub.id
+        
+    for tt in timetable:
+        sub_name = tt["subject"]
+        sub_id = sub_name_to_id.get(sub_name)
+        if not sub_id:
+            db_sub = models.Subject(user_id=user_id, name=sub_name, color=tt.get("color", "#7c4dff"), subject_type="Practical" if "lab" in sub_name.lower() or "practical" in sub_name.lower() else "Theory")
+            db.add(db_sub)
+            db.commit()
+            db.refresh(db_sub)
+            sub_name_to_id[sub_name] = db_sub.id
+            sub_id = db_sub.id
+            
+        start_time_obj = time.fromisoformat(tt["start"])
+        end_time_obj = time.fromisoformat(tt["end"])
+        
+        db_tt = models.Timetable(
+            user_id=user_id,
+            subject_id=sub_id,
+            day=tt["day"],
+            start_time=start_time_obj,
+            end_time=end_time_obj,
+            room=tt.get("room"),
+            type=tt.get("type", "Lecture")
+        )
+        db.add(db_tt)
+    db.commit()
+    
+    for date_str, logs in attendance_logs.items():
+        date_obj = date.fromisoformat(date_str)
+        for log in logs:
+            sub_name = log["subject"]
+            sub_id = sub_name_to_id.get(sub_name)
+            if not sub_id:
+                continue
+            
+            start_time_obj = time.fromisoformat(log["start"]) if log.get("start") else None
+            
+            db_att = models.Attendance(
+                user_id=user_id,
+                subject_id=sub_id,
+                date=date_obj,
+                start_time=start_time_obj,
+                status=log["status"],
+                remarks=log.get("remarks")
+            )
+            db.add(db_att)
+            
+    db.commit()
+    return {"message": "State restored successfully"}
+
+@app.delete("/user/profile", tags=["User"])
+def delete_user_profile(current_user: models.User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    db.delete(current_user)
+    db.commit()
+    return {"message": "Account deleted successfully"}
 
 # SPA Fallback Routes (Must be defined at the bottom to avoid intercepting specific API routes)
 if os.path.exists(frontend_dist):

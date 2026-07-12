@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 from typing import List, Optional
 from datetime import date, time, datetime
 
@@ -17,10 +17,22 @@ class UserBase(BaseModel):
     college: Optional[str] = None
     branch: Optional[str] = None
     semester: Optional[str] = None
+    roll_number: Optional[str] = None
+    section: Optional[str] = None
+    year: Optional[str] = None
+    register_number: Optional[str] = None
+    university: Optional[str] = None
     attendance_goal: float = 75.0
 
 class UserCreate(UserBase):
     password: str
+
+    @field_validator("password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        if len(v) < 6:
+            raise ValueError("Password must be at least 6 characters long")
+        return v
 
 class UserLogin(BaseModel):
     email: EmailStr
@@ -36,7 +48,26 @@ class User(UserBase):
 class UserUpdate(BaseModel):
     name: str
     attendance_goal: float
-    semester: str
+    semester: Optional[str] = None
+    college: Optional[str] = None
+    branch: Optional[str] = None
+    roll_number: Optional[str] = None
+    section: Optional[str] = None
+    year: Optional[str] = None
+    register_number: Optional[str] = None
+    university: Optional[str] = None
+    profile_photo: Optional[str] = None
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        if len(v) < 6:
+            raise ValueError("Password must be at least 6 characters long")
+        return v
 
 # --- Subject Schemas ---
 class SubjectBase(BaseModel):
@@ -46,6 +77,9 @@ class SubjectBase(BaseModel):
     credits: int = 3
     color: str = "#7c4dff"
     minimum_required_attendance: float = 75.0
+    subject_type: str = "Theory"
+    weekly_classes: int = 4
+    total_planned_classes: int = 40
 
 class SubjectCreate(SubjectBase):
     pass
@@ -200,6 +234,7 @@ class ClassSessionOut(BaseModel):
 
 class MarkSessionRequest(BaseModel):
     status: str  # present, absent, cancelled, holiday
+    remarks: Optional[str] = None
 
 class ExtraClassCreate(BaseModel):
     semester_id: int

@@ -99,7 +99,15 @@ let appState = {
         name: "Sarah Jenkins",
         targetGoal: 75,
         term: "Semester 1 (Autumn)",
-        streak: 12
+        streak: 12,
+        college: "Engineering College",
+        branch: "Computer Science",
+        roll_number: "21CS001",
+        section: "A",
+        year: "2nd Year",
+        register_number: "",
+        university: "",
+        profile_photo: ""
     },
     subjects: DEFAULT_SUBJECTS,
     timetable: DEFAULT_TIMETABLE,
@@ -220,7 +228,7 @@ async function handleAuthSignUp(e) {
             document.getElementById("signin-password").value = password;
         } else {
             const err = await response.json();
-            showToast("Registration Failed", err.detail || "Could not register account", "error");
+            showToast("Registration Failed", err.message || err.detail || "Could not register account", "error");
         }
     } catch (err) {
         showToast("Error", "Could not connect to auth server", "error");
@@ -235,8 +243,92 @@ function handleAuthSignOut() {
     }
 }
 
+async function handleForgotPassword(e) {
+    e.preventDefault();
+    const email = document.getElementById("fp-email").value.trim();
+    try {
+        const response = await fetch(`${API_BASE_URL}/auth/forgot-password`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email })
+        });
+        if (response.ok) {
+            showToast("Token Sent", "Check the server console for the reset token.", "check_circle");
+            document.getElementById("fp-step-email").classList.add("hidden");
+            document.getElementById("fp-step-reset").classList.remove("hidden");
+        } else {
+            const err = await response.json();
+            showToast("Failed", err.detail || "Could not request reset token", "error");
+        }
+    } catch (err) {
+        showToast("Error", "Could not connect to auth server", "error");
+        console.error(err);
+    }
+}
+
+async function handleResetPassword(e) {
+    e.preventDefault();
+    const token = document.getElementById("fp-token").value.trim();
+    const newPassword = document.getElementById("fp-new-password").value;
+    try {
+        const response = await fetch(`${API_BASE_URL}/auth/reset-password`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ token, new_password: newPassword })
+        });
+        if (response.ok) {
+            showToast("Password Reset Successful", "Please sign in with your new password.", "check_circle");
+            toggleModal("forgotPasswordModal");
+            document.getElementById("fp-step-email").classList.remove("hidden");
+            document.getElementById("fp-step-reset").classList.add("hidden");
+        } else {
+            const err = await response.json();
+            showToast("Failed", err.detail || "Password reset failed", "error");
+        }
+    } catch (err) {
+        showToast("Error", "Could not connect to auth server", "error");
+        console.error(err);
+    }
+}
+
+async function handleGoogleSignIn() {
+    showToast("Google Sign-In", "Simulating Google Account connection...", "insights");
+    setTimeout(async () => {
+        const name = "Google Student";
+        const email = "google_student@example.com";
+        try {
+            const response = await fetch(`${API_BASE_URL}/auth/google-login`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name, email })
+            });
+            if (response.ok) {
+                const data = await response.json();
+                localStorage.setItem("access_token", data.access_token);
+                showToast("Google Login Success", "Welcome back!", "check_circle");
+                await initAppState();
+                tabNavigation("dashboard");
+            } else {
+                const err = await response.json();
+                showToast("OAuth Failed", err.detail || "Could not log in via Google", "error");
+            }
+        } catch (err) {
+            showToast("Error", "Could not connect to auth server", "error");
+            console.error(err);
+        }
+    }, 1200);
+}
+
+
 // Initial state loader
 async function initAppState() {
+    // Check PIN Lock
+    const pinEnabled = localStorage.getItem("pin_enabled") === "true";
+    if (pinEnabled) {
+        const overlay = document.getElementById("pinLockOverlay");
+        if (overlay) overlay.classList.remove("hidden");
+    }
+
     const token = localStorage.getItem("access_token");
     if (!token) {
         showAuthScreen();
@@ -254,6 +346,7 @@ async function initAppState() {
             appState.timetable = data.timetable;
             appState.attendanceLogs = data.attendanceLogs;
             appState.activeSemester = data.active_semester;
+            appState.holidays = data.holidays || [];
             if (appState.activeSemester) {
                 try {
                     const holResponse = await fetch(`${API_BASE_URL}/semesters/${appState.activeSemester.id}/holidays`, {
@@ -292,6 +385,26 @@ async function initAppState() {
     // Load notifications from local storage and run engine
     loadNotifications();
     generateSmartNotifications();
+    
+    // Apply preferences
+    applyTheme(localStorage.getItem("theme") || "dark");
+    applyAccentColor(localStorage.getItem("accent_color") || "purple");
+    applyLanguage(localStorage.getItem("lang") || "en");
+    toggleFloatingWidget(localStorage.getItem("widget_enabled") === "true");
+    
+    // Render profile photo in sidebar
+    const avatarImg = document.getElementById("header-avatar-img");
+    const avatarIcon = document.getElementById("header-avatar-icon");
+    if (appState.profile && appState.profile.profile_photo) {
+        if (avatarImg) {
+            avatarImg.src = appState.profile.profile_photo;
+            avatarImg.classList.remove("hidden");
+        }
+        if (avatarIcon) avatarIcon.classList.add("hidden");
+    } else {
+        if (avatarImg) avatarImg.classList.add("hidden");
+        if (avatarIcon) avatarIcon.classList.remove("hidden");
+    }
 }
 
 async function saveStateToLocalStorage() {
@@ -924,6 +1037,10 @@ function renderDashboard() {
     renderDashboardRecentLogs();
     renderDashboardAiInsights(global, analysis, displayStreak);
     updateSemesterDashboard();
+
+    if (localStorage.getItem("widget_enabled") === "true") {
+        updateFloatingWidgetData();
+    }
 }
 
 // --- DASHBOARD BENTO WIDGETS ---
@@ -1125,6 +1242,35 @@ function renderDashboardAiInsights(global, analysis, displayStreak) {
     box.innerHTML = html;
 }
 
+/**
+ * Normalize any date string to YYYY-MM-DD (ISO 8601) for <input type="date"> and backend.
+ * Handles: YYYY-MM-DD, DD-MM-YYYY, D-M-YYYY, DD/MM/YYYY, D/M/YYYY
+ */
+function normalizeDateToISO(dateStr) {
+    if (!dateStr) return "";
+    dateStr = String(dateStr).trim();
+    // Already ISO format YYYY-MM-DD
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
+    // DD-MM-YYYY or D-M-YYYY (with dashes)
+    const dashDMY = dateStr.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+    if (dashDMY) {
+        const [, d, m, y] = dashDMY;
+        return `${y}-${m.padStart(2,"0")}-${d.padStart(2,"0")}`;
+    }
+    // DD/MM/YYYY or D/M/YYYY (with slashes)
+    const slashDMY = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (slashDMY) {
+        const [, d, m, y] = slashDMY;
+        return `${y}-${m.padStart(2,"0")}-${d.padStart(2,"0")}`;
+    }
+    // Try native Date parse as last resort
+    const parsed = new Date(dateStr);
+    if (!isNaN(parsed.getTime())) {
+        return parsed.toISOString().split("T")[0];
+    }
+    return "";
+}
+
 function formatTimeAmPm(timeStr) {
     const parts = timeStr.split(":");
     let hours = parseInt(parts[0]);
@@ -1141,6 +1287,12 @@ function ensureDailyScheduleReady(dateKey) {
     const d = new Date(parts[0], parts[1] - 1, parts[2]);
     const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     const dayName = weekdays[d.getDay()];
+    
+    // Check if this date is an academic holiday
+    const isAcademicHoliday = appState.holidays && appState.holidays.some(h => {
+        const hDateStr = typeof h.date === "string" ? h.date : h.date.toISOString().split("T")[0];
+        return hDateStr === dateKey;
+    });
     
     // Get expected classes from timetable
     const dayClasses = appState.timetable.filter(c => c.day === dayName).map(c => ({...c}));
@@ -1163,7 +1315,7 @@ function ensureDailyScheduleReady(dateKey) {
                 subject: c.subject,
                 start: c.start,
                 end: c.end,
-                status: "upcoming",
+                status: isAcademicHoliday ? "holiday" : "upcoming",
                 color: c.color
             };
         }
@@ -2230,9 +2382,10 @@ function renderCalendarSelectedDayDetails() {
     const selDate = new Date(selectedCalendarDateStr + "T00:00:00");
     const weekdayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
     const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+    const dayName = weekdayNames[selDate.getDay()];
     
     detailTitle.textContent = `${monthNames[selDate.getMonth()]} ${selDate.getDate()}, ${selDate.getFullYear()}`;
-    detailPill.textContent = weekdayNames[selDate.getDay()];
+    detailPill.textContent = dayName;
     
     // Highlight leaves inside detail panel
     const dayLeave = appState.leavePlans && appState.leavePlans.find(plan => {
@@ -2284,58 +2437,116 @@ function renderCalendarSelectedDayDetails() {
         classesContainer.appendChild(holidayItem);
     }
     
-    const dayLogs = appState.attendanceLogs[selectedCalendarDateStr];
+    // Sunday check
+    if (dayName === "Sunday") {
+        classesContainer.appendChild(Object.assign(document.createElement("div"), {
+            className: "text-center py-6 glass-card rounded-2xl p-4",
+            innerHTML: `
+                <span class="material-symbols-outlined text-[32px] text-on-surface-variant/40">bedtime</span>
+                <p class="text-on-surface-variant font-bold text-[13px] mt-1">Sunday Holiday</p>
+                <p class="text-[10px] text-on-surface-variant/80 mt-0.5">No lectures scheduled. Enjoy your weekend!</p>
+            `
+        }));
+        return;
+    }
+    
+    // Make sure we have the schedule populated from timetable
+    const dayLogs = ensureDailyScheduleReady(selectedCalendarDateStr);
     
     if (!dayLogs || dayLogs.length === 0) {
         classesContainer.appendChild(Object.assign(document.createElement("div"), {
-            className: "text-center py-4 text-on-surface-variant/60 text-[12px] italic",
-            textContent: "No logs recorded for this date."
+            className: "text-center py-6 glass-card rounded-2xl p-4",
+            innerHTML: `
+                <span class="material-symbols-outlined text-[32px] text-on-surface-variant/40">event_busy</span>
+                <p class="text-on-surface-variant font-bold text-[13px] mt-1">No Scheduled Classes</p>
+                <p class="text-[10px] text-on-surface-variant/80 mt-0.5">Your timetable has no lectures configured for ${dayName}s.</p>
+            `
         }));
         return;
     }
     
     dayLogs.forEach(rec => {
         const item = document.createElement("div");
-        item.className = "glass-card rounded-xl p-3.5 flex items-center justify-between";
+        const subjectObj = appState.subjects.find(s => s.name === rec.subject);
+        const subjectColor = subjectObj ? subjectObj.color : rec.color || "#cdbdff";
         
-        let statusBadge = `<span class="text-[10px] font-bold text-on-surface-variant/80 uppercase">No Record</span>`;
-        let iconClass = "text-on-surface-variant";
-        let iconSymbol = "radio_button_unchecked";
+        item.className = "relative bg-surface-container-low border border-outline-variant rounded-2xl overflow-hidden p-3.5 space-y-2.5 transition-all duration-300";
+        item.style.borderLeftColor = subjectColor;
+        item.style.borderLeftWidth = "4px";
+        item.style.borderLeftStyle = "solid";
         
+        let statusBadge = `<span class="px-2 py-0.5 bg-surface-container-highest text-on-surface-variant rounded-full text-[9px] uppercase font-bold tracking-wider">Upcoming</span>`;
         if (rec.status === "present") {
-            statusBadge = `<span class="text-[10px] font-bold text-secondary bg-secondary/10 px-2 py-0.5 rounded-full border border-secondary/20 uppercase">Present</span>`;
-            iconClass = "text-secondary";
-            iconSymbol = "check_circle";
+            statusBadge = `<span class="px-2 py-0.5 bg-secondary/15 text-secondary rounded-full text-[9px] uppercase font-bold tracking-wider border border-secondary/20">Present</span>`;
         } else if (rec.status === "absent") {
-            statusBadge = `<span class="text-[10px] font-bold text-error bg-error/10 px-2 py-0.5 rounded-full border border-error/20 uppercase">Absent</span>`;
-            iconClass = "text-error";
-            iconSymbol = "cancel";
+            statusBadge = `<span class="px-2 py-0.5 bg-error/15 text-error rounded-full text-[9px] uppercase font-bold tracking-wider border border-error/20">Absent</span>`;
         } else if (rec.status === "cancelled") {
-            statusBadge = `<span class="text-[10px] font-bold text-tertiary bg-tertiary/10 px-2 py-0.5 rounded-full border border-tertiary/20 uppercase">Cancelled</span>`;
-            iconClass = "text-tertiary";
-            iconSymbol = "event_busy";
+            statusBadge = `<span class="px-2 py-0.5 bg-tertiary/15 text-on-tertiary-container rounded-full text-[9px] uppercase font-bold tracking-wider border border-tertiary/20">Cancelled</span>`;
         } else if (rec.status === "holiday") {
-            statusBadge = `<span class="text-[10px] font-bold text-on-surface-variant bg-surface-container-highest px-2 py-0.5 rounded-full border border-outline-variant/20 uppercase">Holiday</span>`;
-            iconClass = "text-on-surface-variant";
-            iconSymbol = "festival";
+            statusBadge = `<span class="px-2 py-0.5 bg-outline-variant/15 text-on-surface-variant rounded-full text-[9px] uppercase font-bold tracking-wider border border-outline-variant/20">Holiday</span>`;
         }
         
         item.innerHTML = `
-            <div class="flex items-center gap-3">
-                <div class="w-9 h-9 rounded-xl bg-surface-container-high flex items-center justify-center ${iconClass}">
-                    <span class="material-symbols-outlined text-[20px]">${iconSymbol}</span>
-                </div>
+            <div class="flex justify-between items-start">
                 <div>
                     <h4 class="font-bold text-[13px] text-on-surface leading-tight">${rec.subject}</h4>
-                    <p class="text-[11px] text-on-surface-variant font-label-sm">${formatTimeAmPm(rec.start)} - ${formatTimeAmPm(rec.end)}</p>
+                    <p class="text-[11px] text-on-surface-variant font-label-sm mt-0.5">${formatTimeAmPm(rec.start)} - ${formatTimeAmPm(rec.end)}</p>
+                </div>
+                <div>
+                    ${statusBadge}
                 </div>
             </div>
-            <div>
-                ${statusBadge}
+            <div class="grid grid-cols-4 gap-1 pt-1.5 border-t border-outline-variant/30">
+                <button class="${rec.status === 'present' ? 'bg-secondary text-zinc-950 font-bold' : 'border border-outline-variant text-on-surface-variant hover:bg-surface-container-high'} flex flex-col items-center justify-center py-1 rounded-lg text-[8px] active:scale-95 transition-all" onclick="updateCalendarRecordStatus('${selectedCalendarDateStr}', '${rec.subject}', '${rec.start}', 'present')">
+                    <span>PRESENT</span>
+                </button>
+                <button class="${rec.status === 'absent' ? 'bg-error text-zinc-950 font-bold' : 'border border-outline-variant text-on-surface-variant hover:bg-surface-container-high'} flex flex-col items-center justify-center py-1 rounded-lg text-[8px] active:scale-95 transition-all" onclick="updateCalendarRecordStatus('${selectedCalendarDateStr}', '${rec.subject}', '${rec.start}', 'absent')">
+                    <span>ABSENT</span>
+                </button>
+                <button class="${rec.status === 'cancelled' ? 'bg-tertiary text-zinc-950 font-bold' : 'border border-outline-variant text-on-surface-variant hover:bg-surface-container-high'} flex flex-col items-center justify-center py-1 rounded-lg text-[8px] active:scale-95 transition-all" onclick="updateCalendarRecordStatus('${selectedCalendarDateStr}', '${rec.subject}', '${rec.start}', 'cancelled')">
+                    <span>CANCEL</span>
+                </button>
+                <button class="${rec.status === 'holiday' ? 'bg-on-surface-variant text-zinc-950 font-bold' : 'border border-outline-variant text-on-surface-variant hover:bg-surface-container-high'} flex flex-col items-center justify-center py-1 rounded-lg text-[8px] active:scale-95 transition-all" onclick="updateCalendarRecordStatus('${selectedCalendarDateStr}', '${rec.subject}', '${rec.start}', 'holiday')">
+                    <span>HOLIDAY</span>
+                </button>
             </div>
         `;
         classesContainer.appendChild(item);
     });
+}
+
+async function updateCalendarRecordStatus(dateKey, subject, start, status) {
+    const list = appState.attendanceLogs[dateKey];
+    if (list) {
+        const record = list.find(r => r.subject === subject && r.start === start);
+        if (record) {
+            record.status = status;
+            
+            try {
+                await fetch(`${API_BASE_URL}/attendance/mark`, {
+                    method: "POST",
+                    headers: { 
+                        "Content-Type": "application/json",
+                        ...getAuthHeaders()
+                    },
+                    body: JSON.stringify({
+                        date: dateKey,
+                        subject_name: subject,
+                        start: start,
+                        status: status
+                    })
+                });
+                await refreshStreakFromBackend();
+            } catch (e) {
+                console.error("Failed to sync attendance", e);
+            }
+            
+            renderCalendarSelectedDayDetails();
+            renderCalendarGrid();
+            renderCalendarMonthStats();
+            showToast("Log Updated", `Marked ${subject} as ${status.toUpperCase()}.`, "done");
+        }
+    }
 }
 
 function renderCalendarMonthStats() {
@@ -2361,10 +2572,38 @@ function renderCalendarMonthStats() {
 }
 
 // --- F. PROFILE SETTINGS DIALOG ---
+// --- F. PROFILE SETTINGS DIALOG ---
+let tempProfilePhotoBase64 = null;
+let currentPinBuffer = "";
+
 function openProfileModal() {
-    document.getElementById("form-profile-name").value = appState.profile.name;
-    document.getElementById("form-profile-target").value = appState.profile.targetGoal;
-    document.getElementById("form-profile-term").value = appState.profile.term;
+    document.getElementById("form-profile-name").value = appState.profile.name || "";
+    document.getElementById("form-profile-target").value = appState.profile.targetGoal || 75;
+    document.getElementById("form-profile-term").value = appState.profile.term || "";
+    document.getElementById("form-profile-roll").value = appState.profile.roll_number || "";
+    document.getElementById("form-profile-register-num").value = appState.profile.register_number || "";
+    document.getElementById("form-profile-year").value = appState.profile.year || "";
+    document.getElementById("form-profile-section").value = appState.profile.section || "";
+    document.getElementById("form-profile-branch").value = appState.profile.branch || "";
+    document.getElementById("form-profile-college").value = appState.profile.college || "";
+    document.getElementById("form-profile-university").value = appState.profile.university || "";
+    
+    if (appState.profile.profile_photo) {
+        document.getElementById("form-profile-photo-img").src = appState.profile.profile_photo;
+    } else {
+        document.getElementById("form-profile-photo-img").src = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=200&auto=format&fit=crop";
+    }
+    
+    // Preferences
+    document.getElementById("form-profile-pin-enabled").checked = localStorage.getItem("pin_enabled") === "true";
+    document.getElementById("form-profile-pin-code").value = localStorage.getItem("pin_code") || "";
+    document.getElementById("form-profile-accent").value = localStorage.getItem("accent_color") || "purple";
+    document.getElementById("form-profile-theme").value = localStorage.getItem("theme") || "dark";
+    document.getElementById("form-profile-widget-enabled").checked = localStorage.getItem("widget_enabled") === "true";
+    document.getElementById("form-profile-lang").value = localStorage.getItem("lang") || "en";
+    
+    tempProfilePhotoBase64 = appState.profile.profile_photo || null;
+    
     toggleModal("profileModal");
 }
 
@@ -2373,6 +2612,25 @@ async function saveProfileSettings(e) {
     const name = document.getElementById("form-profile-name").value.trim();
     const targetGoal = parseInt(document.getElementById("form-profile-target").value);
     const term = document.getElementById("form-profile-term").value;
+    const roll = document.getElementById("form-profile-roll").value.trim();
+    const registerNum = document.getElementById("form-profile-register-num").value.trim();
+    const year = document.getElementById("form-profile-year").value.trim();
+    const section = document.getElementById("form-profile-section").value.trim();
+    const branch = document.getElementById("form-profile-branch").value.trim();
+    const college = document.getElementById("form-profile-college").value.trim();
+    const university = document.getElementById("form-profile-university").value.trim();
+    
+    const pinEnabled = document.getElementById("form-profile-pin-enabled").checked;
+    const pinCode = document.getElementById("form-profile-pin-code").value.trim();
+    const accentVal = document.getElementById("form-profile-accent").value;
+    const themeVal = document.getElementById("form-profile-theme").value;
+    const widgetEnabled = document.getElementById("form-profile-widget-enabled").checked;
+    const langVal = document.getElementById("form-profile-lang").value;
+    
+    if (pinEnabled && pinCode.length !== 4) {
+        showToast("Invalid PIN", "PIN code must be exactly 4 digits.", "warning");
+        return;
+    }
     
     try {
         const response = await fetch(`${API_BASE_URL}/user/profile`, {
@@ -2384,7 +2642,15 @@ async function saveProfileSettings(e) {
             body: JSON.stringify({
                 name: name,
                 attendance_goal: targetGoal,
-                semester: term
+                semester: term,
+                college: college,
+                branch: branch,
+                roll_number: roll,
+                section: section,
+                year: year,
+                register_number: registerNum,
+                university: university,
+                profile_photo: tempProfilePhotoBase64
             })
         });
         
@@ -2392,6 +2658,43 @@ async function saveProfileSettings(e) {
             appState.profile.name = name;
             appState.profile.targetGoal = targetGoal;
             appState.profile.term = term;
+            appState.profile.college = college;
+            appState.profile.branch = branch;
+            appState.profile.roll_number = roll;
+            appState.profile.section = section;
+            appState.profile.year = year;
+            appState.profile.register_number = registerNum;
+            appState.profile.university = university;
+            appState.profile.profile_photo = tempProfilePhotoBase64;
+            
+            // Save preferences
+            localStorage.setItem("pin_enabled", pinEnabled ? "true" : "false");
+            localStorage.setItem("pin_code", pinCode);
+            localStorage.setItem("theme", themeVal);
+            localStorage.setItem("accent_color", accentVal);
+            localStorage.setItem("widget_enabled", widgetEnabled ? "true" : "false");
+            localStorage.setItem("lang", langVal);
+            
+            // Apply preferences immediately
+            applyTheme(themeVal);
+            applyAccentColor(accentVal);
+            applyLanguage(langVal);
+            toggleFloatingWidget(widgetEnabled);
+            
+            // Render avatar changes
+            const avatarImg = document.getElementById("header-avatar-img");
+            const avatarIcon = document.getElementById("header-avatar-icon");
+            if (tempProfilePhotoBase64) {
+                if (avatarImg) {
+                    avatarImg.src = tempProfilePhotoBase64;
+                    avatarImg.classList.remove("hidden");
+                }
+                if (avatarIcon) avatarIcon.classList.add("hidden");
+            } else {
+                if (avatarImg) avatarImg.classList.add("hidden");
+                if (avatarIcon) avatarIcon.classList.remove("hidden");
+            }
+            
             showToast("Profile Saved", "Updated goals and student profile parameters successfully.", "check_circle");
             toggleModal("profileModal");
             // Reload active view
@@ -2402,6 +2705,358 @@ async function saveProfileSettings(e) {
     } catch (e) {
         console.error("Failed to save profile", e);
         showToast("Error", "Could not connect to backend server", "error");
+    }
+}
+
+function handleProfilePhotoUpload(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    if (file.size > 2 * 1024 * 1024) {
+        showToast("File Too Large", "Profile picture must be under 2MB.", "error");
+        return;
+    }
+    
+    const reader = new FileReader();
+    reader.onload = function(evt) {
+        tempProfilePhotoBase64 = evt.target.result;
+        document.getElementById("form-profile-photo-img").src = tempProfilePhotoBase64;
+        showToast("Photo Selected", "Press Save Changes to update permanently.", "check_circle");
+    };
+    reader.readAsDataURL(file);
+}
+
+async function deleteUserAccount() {
+    if (!confirm("Are you absolutely sure you want to delete your account? This action is permanent and all attendance logs, timetable versions, and academic semesters will be deleted forever!")) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/user/profile`, {
+            method: "DELETE",
+            headers: getAuthHeaders()
+        });
+        
+        if (response.ok) {
+            showToast("Account Deleted", "Your account has been deleted successfully.", "check_circle");
+            localStorage.removeItem("access_token");
+            localStorage.removeItem("pin_enabled");
+            localStorage.removeItem("pin_code");
+            localStorage.removeItem("theme");
+            localStorage.removeItem("accent_color");
+            localStorage.removeItem("widget_enabled");
+            localStorage.removeItem("lang");
+            
+            toggleModal("profileModal");
+            showAuthScreen();
+        } else {
+            showToast("Deletion Failed", "Failed to delete account from backend database.", "error");
+        }
+    } catch (err) {
+        console.error("Deletion error:", err);
+        showToast("Error", "Could not connect to backend server.", "error");
+    }
+}
+
+// Preference Appliers
+function applyTheme(theme) {
+    if (theme === "light") {
+        document.documentElement.classList.remove("dark");
+        document.documentElement.classList.add("light");
+    } else {
+        document.documentElement.classList.remove("light");
+        document.documentElement.classList.add("dark");
+    }
+    localStorage.setItem("theme", theme);
+}
+
+function applyAccentColor(accent) {
+    let primary, secondary, primaryContainer, onPrimaryFixed;
+    if (accent === "green") {
+        primary = "#a7f3d0";
+        secondary = "#34d399";
+        primaryContainer = "#047857";
+        onPrimaryFixed = "#064e3b";
+    } else if (accent === "amber") {
+        primary = "#fde68a";
+        secondary = "#fbbf24";
+        primaryContainer = "#b45309";
+        onPrimaryFixed = "#78350f";
+    } else if (accent === "cyan") {
+        primary = "#a5f3fc";
+        secondary = "#22d3ee";
+        primaryContainer = "#0891b2";
+        onPrimaryFixed = "#083344";
+    } else { // purple default
+        primary = "#cdbdff";
+        secondary = "#40e56c";
+        primaryContainer = "#7c4dff";
+        onPrimaryFixed = "#20005f";
+    }
+    
+    if (window.tailwind) {
+        window.tailwind.config.theme.extend.colors.primary = primary;
+        window.tailwind.config.theme.extend.colors.secondary = secondary;
+        window.tailwind.config.theme.extend.colors["primary-container"] = primaryContainer;
+        window.tailwind.config.theme.extend.colors["on-primary-fixed"] = onPrimaryFixed;
+    }
+    localStorage.setItem("accent_color", accent);
+}
+
+const LOCALIZATION = {
+    en: {
+        dashboard: "Dashboard",
+        daily: "Daily Checklist",
+        analytics: "Analytics",
+        reports: "Reports",
+        schedule: "Schedule",
+        overview_subtitle: "Overview of your attendance performance",
+        daily_subtitle: "Track today's class-by-class attendance status",
+        analytics_subtitle: "Deep-dive subject-wise and historical insights",
+        reports_subtitle: "Export attendance certificates and PDF summaries",
+        schedule_subtitle: "Timetable grid and version management"
+    },
+    te: {
+        dashboard: "డ్యాష్‌బోర్డ్",
+        daily: "రోజువారీ చెక్‌లిస్ట్",
+        analytics: "విశ్లేషణలు",
+        reports: "నివేదికలు",
+        schedule: "సమయపట్టిక",
+        overview_subtitle: "మీ హాజరు పనితీరు యొక్క అవలోకనం",
+        daily_subtitle: "ఈ రోజు తరగతి వారీగా హాజరు స్థితిని ట్రాక్ చేయండి",
+        analytics_subtitle: "సబ్జెక్ట్ వారీగా మరియు చారిత్రక అంతర్దృష్టులు",
+        reports_subtitle: "PDF సారాంశాలను డౌన్‌లోड చేసుకోండి",
+        schedule_subtitle: "సమయపట్టిక గ్రిడ్ మరియు వెర్షన్ల నిర్వహణ"
+    },
+    hi: {
+        dashboard: "डैशबोर्ड",
+        daily: "दैनिक चेकलिस्ट",
+        analytics: "विश्लेषण",
+        reports: "रिपोर्ट्स",
+        schedule: "समय-सारणी",
+        overview_subtitle: "आपकी उपस्थिति के प्रदर्शन का अवलोकन",
+        daily_subtitle: "आज की कक्षा-वार उपस्थिति स्थिति को ट्रैक करें",
+        analytics_subtitle: "विषय-वार और ऐतिहासिक विस्तृत जानकारी",
+        reports_subtitle: "पीडीएफ सारांश निर्यात करें",
+        schedule_subtitle: "समय-सारणी ग्रिड और प्रबंधन"
+    },
+    es: {
+        dashboard: "Tablero",
+        daily: "Lista Diaria",
+        analytics: "Analítica",
+        reports: "Informes",
+        schedule: "Horario",
+        overview_subtitle: "Descripción general de su rendimiento de asistencia",
+        daily_subtitle: "Seguimiento de asistencia hoy",
+        analytics_subtitle: "Información detallada por tema e histórica",
+        reports_subtitle: "Exportar resúmenes en PDF",
+        schedule_subtitle: "Cuadrícula de horarios y gestión"
+    }
+};
+
+function applyLanguage(lang) {
+    const dict = LOCALIZATION[lang] || LOCALIZATION.en;
+    
+    const navDashboard = document.getElementById("nav-btn-dashboard");
+    const navDaily = document.getElementById("nav-btn-daily");
+    const navAnalytics = document.getElementById("nav-btn-analytics");
+    const navReports = document.getElementById("nav-btn-reports");
+    const navSchedule = document.getElementById("nav-btn-schedule");
+    
+    if (navDashboard) {
+        navDashboard.innerHTML = `<span class="material-symbols-outlined text-[18px]">dashboard</span> ${dict.dashboard}`;
+    }
+    if (navDaily) {
+        navDaily.innerHTML = `<span class="material-symbols-outlined text-[18px]">rule</span> ${dict.daily}`;
+    }
+    if (navAnalytics) {
+        navAnalytics.innerHTML = `<span class="material-symbols-outlined text-[18px]">insights</span> ${dict.analytics}`;
+    }
+    if (navReports) {
+        navReports.innerHTML = `<span class="material-symbols-outlined text-[18px]">description</span> ${dict.reports}`;
+    }
+    if (navSchedule) {
+        navSchedule.innerHTML = `<span class="material-symbols-outlined text-[18px]">calendar_today</span> ${dict.schedule}`;
+    }
+    
+    const activeTabTitle = document.getElementById("page-title");
+    const activeTabSubtitle = document.getElementById("page-subtitle");
+    if (activeTabTitle && activeTabSubtitle) {
+        if (currentTab === "dashboard") {
+            activeTabTitle.textContent = dict.dashboard;
+            activeTabSubtitle.textContent = dict.overview_subtitle;
+        } else if (currentTab === "daily") {
+            activeTabTitle.textContent = dict.daily;
+            activeTabSubtitle.textContent = dict.daily_subtitle;
+        } else if (currentTab === "analytics") {
+            activeTabTitle.textContent = dict.analytics;
+            activeTabSubtitle.textContent = dict.analytics_subtitle;
+        } else if (currentTab === "reports") {
+            activeTabTitle.textContent = dict.reports;
+            activeTabSubtitle.textContent = dict.reports_subtitle;
+        } else if (currentTab === "schedule") {
+            activeTabTitle.textContent = dict.schedule;
+            activeTabSubtitle.textContent = dict.schedule_subtitle;
+        }
+    }
+    localStorage.setItem("lang", lang);
+}
+
+function toggleFloatingWidget(checked) {
+    const widget = document.getElementById("floating-widget-preview");
+    if (!widget) return;
+    
+    if (checked) {
+        widget.classList.remove("hidden");
+        updateFloatingWidgetData();
+    } else {
+        widget.classList.add("hidden");
+    }
+    localStorage.setItem("widget_enabled", checked ? "true" : "false");
+    
+    const chk = document.getElementById("form-profile-widget-enabled");
+    if (chk) chk.checked = checked;
+}
+
+function updateFloatingWidgetData() {
+    const pctEl = document.getElementById("widget-overall-pct");
+    const remEl = document.getElementById("widget-classes-rem");
+    const currentClassEl = document.getElementById("widget-current-class");
+    const countdownEl = document.getElementById("widget-countdown");
+    const warningBanner = document.getElementById("widget-warning-banner");
+    
+    if (!pctEl) return;
+    
+    const global = calculateGlobalAttendance();
+    pctEl.textContent = `${global.percentage}%`;
+    
+    if (global.percentage >= appState.profile.targetGoal) {
+        pctEl.className = "font-extrabold text-[22px] text-secondary";
+        if (warningBanner) warningBanner.classList.add("hidden");
+    } else {
+        pctEl.className = "font-extrabold text-[22px] text-error";
+        if (warningBanner) {
+            warningBanner.classList.remove("hidden");
+            warningBanner.textContent = `CRITICAL: Attendance below ${appState.profile.targetGoal}%!`;
+        }
+    }
+    
+    let totalExpectedClasses = 0;
+    let totalRemainingClasses = 0;
+    if (appState.activeSemester) {
+        const startDate = new Date(appState.activeSemester.start_date + "T00:00:00");
+        const endDate = new Date(appState.activeSemester.end_date + "T00:00:00");
+        const today = new Date();
+        today.setHours(0,0,0,0);
+        const holidays = getCombinedHolidayDates();
+        const remainingStart = today > startDate ? today : startDate;
+        
+        const uniqueSubjects = Array.from(new Set(appState.timetable.map(t => t.subject)));
+        uniqueSubjects.forEach(subName => {
+            if (subName.toLowerCase().includes("break") || subName.toLowerCase().includes("recess")) return;
+            totalExpectedClasses += calculateSubjectExpectedClasses(subName, startDate, endDate, holidays, appState.timetable);
+            totalRemainingClasses += today > endDate ? 0 : calculateSubjectExpectedClasses(subName, remainingStart, endDate, holidays, appState.timetable);
+        });
+        remEl.textContent = `${totalRemainingClasses} Classes Left`;
+    } else {
+        remEl.textContent = "0 Classes Left";
+    }
+    
+    const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const today = new Date();
+    const dayStr = weekdays[today.getDay()];
+    const todayClasses = appState.timetable.filter(c => c.day === dayStr);
+    
+    const nowStr = `${String(today.getHours()).padStart(2, "0")}:${String(today.getMinutes()).padStart(2, "0")}`;
+    const activeClass = todayClasses.find(c => c.start <= nowStr && c.end >= nowStr);
+    if (activeClass) {
+        currentClassEl.textContent = activeClass.subject;
+        const [endH, endM] = activeClass.end.split(":").map(Number);
+        const minutesLeft = (endH * 60 + endM) - (today.getHours() * 60 + today.getMinutes());
+        countdownEl.textContent = `${minutesLeft} min remaining`;
+        countdownEl.classList.remove("hidden");
+    } else {
+        const nextClass = todayClasses.filter(c => c.start > nowStr).sort((a, b) => a.start.localeCompare(b.start))[0];
+        if (nextClass) {
+            currentClassEl.textContent = `Next: ${nextClass.subject}`;
+            const [startH, startM] = nextClass.start.split(":").map(Number);
+            const minutesToStart = (startH * 60 + startM) - (today.getHours() * 60 + today.getMinutes());
+            if (minutesToStart > 60) {
+                const hrs = Math.floor(minutesToStart / 60);
+                countdownEl.textContent = `starts in ${hrs} hr`;
+            } else {
+                countdownEl.textContent = `starts in ${minutesToStart} min`;
+            }
+            countdownEl.classList.remove("hidden");
+        } else {
+            currentClassEl.textContent = "Free Period";
+            countdownEl.classList.add("hidden");
+        }
+    }
+}
+
+// PIN Keypad functions
+function pressPinNum(num) {
+    const pinCode = localStorage.getItem("pin_code") || "1234";
+    if (currentPinBuffer.length < 4) {
+        currentPinBuffer += num;
+        updatePinDots();
+        
+        if (currentPinBuffer.length === 4) {
+            setTimeout(() => {
+                if (currentPinBuffer === pinCode) {
+                    const overlay = document.getElementById("pinLockOverlay");
+                    if (overlay) overlay.classList.add("hidden");
+                    currentPinBuffer = "";
+                    updatePinDots();
+                    showToast("Access Granted", "PIN authentication successful.", "check_circle");
+                } else {
+                    currentPinBuffer = "";
+                    updatePinDots();
+                    showToast("Access Denied", "Incorrect Security PIN code entered.", "error");
+                    const prompt = document.getElementById("pin-lock-prompt");
+                    if (prompt) {
+                        prompt.textContent = "Incorrect PIN. Try again!";
+                        prompt.classList.add("text-error");
+                        setTimeout(() => {
+                            prompt.textContent = "Enter your 4-digit security PIN";
+                            prompt.classList.remove("text-error");
+                        }, 2000);
+                    }
+                }
+            }, 300);
+        }
+    }
+}
+
+function simulateBiometricUnlock() {
+    showToast("Biometric Auth", "Verifying face/fingerprint credentials...", "insights");
+    setTimeout(() => {
+        const overlay = document.getElementById("pinLockOverlay");
+        if (overlay) overlay.classList.add("hidden");
+        currentPinBuffer = "";
+        updatePinDots();
+        showToast("Access Granted", "Biometric verification successful.", "check_circle");
+    }, 1000);
+}
+
+function clearPinInput() {
+    if (currentPinBuffer.length > 0) {
+        currentPinBuffer = currentPinBuffer.slice(0, -1);
+        updatePinDots();
+    }
+}
+
+function updatePinDots() {
+    for (let i = 1; i <= 4; i++) {
+        const dot = document.getElementById(`pin-dot-${i}`);
+        if (dot) {
+            if (i <= currentPinBuffer.length) {
+                dot.className = "w-3.5 h-3.5 rounded-full bg-primary border-2 border-primary shadow-[0_0_8px_rgba(124,77,255,0.6)] transition-all";
+            } else {
+                dot.className = "w-3.5 h-3.5 rounded-full border-2 border-outline-variant/60 bg-transparent transition-all";
+            }
+        }
     }
 }
 
@@ -3403,12 +4058,12 @@ async function startCalendarScanning() {
         
         showToast("Calendar Scanned ✨", "Academic calendar data processed.", "check_circle");
         
-        // Populate Verification Screen metrics
-        document.getElementById("ob-verify-start").textContent = data.semesterStart || "N/A";
-        document.getElementById("ob-verify-end").textContent = data.semesterEnd || "N/A";
-        document.getElementById("ob-verify-holidays").textContent = data.holidays.length;
-        document.getElementById("ob-verify-mid-exams").textContent = data.midExams.length;
-        document.getElementById("ob-verify-final-exams").textContent = data.examDates.length;
+        // Populate Verification Screen metrics — normalize dates to YYYY-MM-DD for <input type="date">
+        document.getElementById("ob-verify-start").value = normalizeDateToISO(data.semesterStart) || "";
+        document.getElementById("ob-verify-end").value = normalizeDateToISO(data.semesterEnd) || "";
+        document.getElementById("ob-verify-holidays").textContent = (data.holidays || []).length;
+        document.getElementById("ob-verify-mid-exams").textContent = (data.midExams || []).length;
+        document.getElementById("ob-verify-final-exams").textContent = (data.examDates || []).length;
         
         // Calculate expected active working days
         if (data.semesterStart && data.semesterEnd) {
@@ -3490,16 +4145,22 @@ async function startCalendarScanning() {
 }
 
 async function saveOnboardingWizardData() {
-    if (!parsedCalendarData) {
-        showToast("Verification Required", "Academic calendar data is missing.", "warning");
+    // Read dates from the editable inputs (user may have typed manually)
+    const rawStart = document.getElementById("ob-verify-start").value || (parsedCalendarData && parsedCalendarData.semesterStart) || "";
+    const rawEnd = document.getElementById("ob-verify-end").value || (parsedCalendarData && parsedCalendarData.semesterEnd) || "";
+    
+    // Normalize to YYYY-MM-DD regardless of what AI or user entered
+    const startVal = normalizeDateToISO(rawStart);
+    const endVal = normalizeDateToISO(rawEnd);
+    
+    if (!startVal || !endVal) {
+        showToast("Semester Dates Required", "Please enter valid semester start and end dates (e.g. 2026-06-01).", "error");
         return;
     }
     
-    const startVal = parsedCalendarData.semesterStart;
-    const endVal = parsedCalendarData.semesterEnd;
-    
-    if (!startVal || !endVal) {
-        showToast("Semester Dates Missing", "The AI could not determine the semester dates from the calendar.", "error");
+    // Validate dates are in correct order
+    if (new Date(startVal) >= new Date(endVal)) {
+        showToast("Invalid Dates", "Semester start date must be before the end date.", "error");
         return;
     }
     
@@ -3523,17 +4184,18 @@ async function saveOnboardingWizardData() {
         
         // Update user profile info first
         if (college || branch || term || targetGoal) {
-            await fetch(`${API_BASE_URL}/users/me/profile`, {
+            await fetch(`${API_BASE_URL}/user/profile`, {
                 method: "PUT",
                 headers: {
                     "Content-Type": "application/json",
                     ...getAuthHeaders()
                 },
                 body: JSON.stringify({
+                    name: appState.profile.name || "Sarah Jenkins",
                     college: college || appState.profile.college,
                     branch: branch || appState.profile.branch,
-                    term: term || appState.profile.term,
-                    target_goal: targetGoal
+                    semester: term || appState.profile.term,
+                    attendance_goal: parseFloat(targetGoal)
                 })
             });
         }
@@ -3657,23 +4319,57 @@ window.toggleTimetableViewMode = toggleTimetableViewMode;
 window.toggleModal = toggleModal;
 window.openAddClassModal = openAddClassModal;
 window.changeCalendarMonth = changeCalendarMonth;
-window.handleOcrFileDrop = handleOcrFileDrop;
-window.removeSelectedOcrFile = removeSelectedOcrFile;
-window.startOcrFileScanning = startOcrFileScanning;
 window.saveCustomClass = saveCustomClass;
 window.saveProfileSettings = saveProfileSettings;
 window.handleCreateLeavePlan = handleCreateLeavePlan;
 window.resetAppData = resetAppData;
+window.handleProfilePhotoUpload = handleProfilePhotoUpload;
+window.pressPinNum = pressPinNum;
+window.simulateBiometricUnlock = simulateBiometricUnlock;
+window.clearPinInput = clearPinInput;
+window.toggleFloatingWidget = toggleFloatingWidget;
+window.deleteUserAccount = deleteUserAccount;
 
 // Add missing exposures for dynamic element event handlers
 window.updateRecordStatus = updateRecordStatus;
+window.updateCalendarRecordStatus = updateCalendarRecordStatus;
 window.editClassRecord = editClassRecord;
 window.deleteClassRecord = deleteClassRecord;
 window.openAddClassModalForSlot = openAddClassModalForSlot;
 window.deleteLeavePlan = deleteLeavePlan;
 window.onClassPeriodSelectChange = onClassPeriodSelectChange;
 
-// --- SEMESTER DETAILS & DATE UTILITIES ---
+function getCombinedHolidayDates() {
+    const dates = [];
+    
+    // 1. Add academic holidays (fetched from backend)
+    if (appState.holidays && Array.isArray(appState.holidays)) {
+        appState.holidays.forEach(h => {
+            if (typeof h.date === "string") {
+                dates.push(h.date);
+            } else if (h.date && h.date.toISOString) {
+                dates.push(h.date.toISOString().split("T")[0]);
+            }
+        });
+    }
+    
+    // 2. Add leave plan dates (expanded from start_date to end_date)
+    if (appState.leavePlans && Array.isArray(appState.leavePlans)) {
+        appState.leavePlans.forEach(plan => {
+            if (plan.start_date && plan.end_date) {
+                const start = new Date(plan.start_date + "T00:00:00");
+                const end = new Date(plan.end_date + "T00:00:00");
+                let curr = new Date(start);
+                while (curr <= end) {
+                    dates.push(formatDateKey(curr));
+                    curr.setDate(curr.getDate() + 1);
+                }
+            }
+        });
+    }
+    
+    return dates;
+}
 
 function countWeekdaysInRange(startDate, endDate, dayName, holidays) {
     const daysMap = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -3929,7 +4625,7 @@ function updateSemesterDashboard() {
     document.getElementById("sem-card-length-weeks").textContent = weeksText;
     
     // Working days
-    const holidays = appState.leavePlans || [];
+    const holidays = getCombinedHolidayDates();
     const totalWorkingDays = calculateWorkingDays(startDate, endDate, holidays, appState.timetable);
     const remainingStart = today > startDate ? today : startDate;
     const remainingWorkingDays = today > endDate ? 0 : calculateWorkingDays(remainingStart, endDate, holidays, appState.timetable);
@@ -4078,4 +4774,7 @@ window.handleObCalDrop = handleObCalDrop;
 window.startTimetableScanning = startTimetableScanning;
 window.startCalendarScanning = startCalendarScanning;
 window.saveOnboardingWizardData = saveOnboardingWizardData;
+window.handleForgotPassword = handleForgotPassword;
+window.handleResetPassword = handleResetPassword;
+window.handleGoogleSignIn = handleGoogleSignIn;
 

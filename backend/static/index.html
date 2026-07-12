@@ -272,6 +272,7 @@
         .leave-personal { background: rgba(255,179,174,0.15); color: #ffb3ae; border: 1px solid rgba(255,179,174,0.2); }
     </style>
 
+  <script type="module" crossorigin src="/assets/index-Cas_J2a4.js"></script>
 </head>
 <body class="bg-background text-on-background font-body-md h-screen overflow-hidden flex selection:bg-primary/30">
 
@@ -320,18 +321,7 @@
                     <button type="submit" class="w-full py-3 bg-primary text-on-primary rounded-xl font-bold text-[14px] active:scale-95 transition-all hover:bg-primary/90 mt-2">
                         Sign In
                     </button>
-                    <div class="text-center mt-1.5">
-                        <button type="button" onclick="toggleModal('forgotPasswordModal')" class="text-[11px] text-primary hover:underline font-semibold">Forgot your password?</button>
-                    </div>
-                    <div class="relative flex py-1 items-center">
-                        <div class="flex-grow border-t border-outline-variant/40"></div>
-                        <span class="flex-shrink mx-3 text-on-surface-variant text-[9px] uppercase font-bold">Or</span>
-                        <div class="flex-grow border-t border-outline-variant/40"></div>
-                    </div>
-                    <button type="button" onclick="handleGoogleSignIn()" class="w-full py-2.5 bg-zinc-900 hover:bg-zinc-800 border border-outline-variant rounded-xl text-xs text-on-surface font-bold active:scale-95 transition-all flex items-center justify-center gap-2">
-                        <svg class="w-4 h-4" viewBox="0 0 24 24"><path fill="currentColor" d="M12.24 10.285V13.4h6.86c-.277 1.56-1.602 4.585-6.86 4.585-4.54 0-8.24-3.765-8.24-8.4s3.7-8.4 8.24-8.4c2.58 0 4.307 1.095 5.298 2.045l2.465-2.37C18.435 1.21 15.62 0 12.24 0 5.58 0 0 5.37 0 12s5.58 12 12.24 12c6.96 0 11.57-4.89 11.57-11.79 0-.795-.085-1.4-.195-1.925H12.24z"/></svg>
-                        Sign In with Google
-                    </button>
+
                 </form>
 
                 <!-- Register Form -->
@@ -348,7 +338,7 @@
                     </div>
                     <div>
                         <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Password</label>
-                        <input type="password" id="signup-password" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface px-3 py-2 focus:border-primary focus:outline-none" placeholder="Min. 6 characters" required />
+                        <input type="password" id="signup-password" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface px-3 py-2 focus:border-primary focus:outline-none" placeholder="min 8 characters" required />
                     </div>
                     <div class="grid grid-cols-2 gap-3">
                         <div>
@@ -415,9 +405,8 @@
         </nav>
         <div class="px-4 py-4 border-t border-outline-variant/20">
             <button onclick="openProfileModal()" class="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-surface-container-high transition-colors text-left">
-                <div id="header-avatar-container" class="w-8 h-8 rounded-full bg-surface-container-highest border border-outline-variant flex items-center justify-center flex-shrink-0 overflow-hidden">
-                    <span id="header-avatar-icon" class="material-symbols-outlined text-[16px] text-on-surface-variant">person</span>
-                    <img id="header-avatar-img" class="w-full h-full object-cover hidden" src="" alt="avatar"/>
+                <div class="w-8 h-8 rounded-full bg-surface-container-highest border border-outline-variant flex items-center justify-center flex-shrink-0">
+                    <span class="material-symbols-outlined text-[16px] text-on-surface-variant">person</span>
                 </div>
                 <div class="flex-1 min-w-0">
                     <p id="header-student-name" class="font-semibold text-[13px] text-on-surface truncate">Sarah Jenkins</p>
@@ -519,9 +508,7 @@
                     <button type="submit" class="w-full py-2.5 bg-primary text-on-primary rounded-xl font-bold text-[14px] active:scale-95 transition-all hover:bg-primary-container hover:text-on-primary-container shadow-[0_0_15px_rgba(124,77,255,0.3)]">
                         Sign In
                     </button>
-                    <div class="text-center mt-2">
-                        <button type="button" onclick="toggleModal('forgotPasswordModal')" class="text-[11px] text-primary hover:underline font-semibold">Forgot your password?</button>
-                    </div>
+
 
                 </form>
 
@@ -538,7 +525,7 @@
                         </div>
                         <div>
                             <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Password</label>
-                            <input type="password" id="signup-password" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface p-2.5 focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none" placeholder="Min. 6 characters" required />
+                            <input type="password" id="signup-password" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-[13px] text-on-surface p-2.5 focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none" placeholder="Min. 6 chars" required />
                         </div>
                         <div>
                             <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">College / University</label>
@@ -817,20 +804,6 @@
                         </div>
                     </div>
                 </div>
-                <div class="flex flex-col md:flex-row gap-3 justify-between items-start md:items-center bg-surface-container-low/40 p-3.5 rounded-2xl border border-outline-variant/30">
-                    <div class="flex items-center gap-3 bg-zinc-900 border border-outline-variant/60 rounded-xl px-3 py-1.5 w-full md:w-80">
-                        <span class="material-symbols-outlined text-[18px] text-on-surface-variant">search</span>
-                        <input type="text" id="daily-search-input" oninput="filterDailyLogs()" placeholder="Search subject, faculty, status..." class="bg-transparent border-0 text-xs text-on-surface p-0 focus:ring-0 focus:outline-none w-full"/>
-                    </div>
-                    <div class="flex items-center gap-2">
-                        <span class="text-[11px] font-bold text-on-surface-variant uppercase">View:</span>
-                        <select id="daily-status-filter" onchange="filterDailyLogs()" class="bg-zinc-900 border border-outline-variant rounded-xl text-xs text-on-surface px-2.5 py-1.5 focus:outline-none focus:border-primary">
-                            <option value="all">All Classes</option>
-                            <option value="marked">Marked Only</option>
-                            <option value="unmarked">Unmarked Only</option>
-                        </select>
-                    </div>
-                </div>
                 <div class="flex gap-2 overflow-x-auto pb-1 no-scrollbar" id="daily-week-tabs"></div>
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-4" id="daily-classes-list-container"></div>
             </div>
@@ -860,35 +833,6 @@
                         <div class="h-16 flex-1" id="analytics-trend-svg-box"></div>
                     </div>
                 </div>
-                <!-- New Analytics Visual Charts (Bar & Pie Charts) -->
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
-                    <!-- Bar Chart for Subject Comparison -->
-                    <div class="glass-card rounded-2xl p-5">
-                        <div class="flex items-center justify-between mb-4">
-                            <h3 class="font-semibold text-[12px] text-on-surface-variant uppercase tracking-wider">Subject Comparison</h3>
-                            <span class="text-[10px] font-bold text-primary bg-primary/15 px-2.5 py-0.5 rounded-full border border-primary/20">BAR CHART</span>
-                        </div>
-                        <div id="analytics-bar-chart-container" class="h-48 flex items-end justify-around gap-2 pt-2 border-b border-outline-variant/30">
-                            <!-- Dynamically generated SVG Bar chart -->
-                        </div>
-                    </div>
-                    <!-- Pie Chart for Attendance Status Categories Breakdown -->
-                    <div class="glass-card rounded-2xl p-5 flex flex-col justify-between">
-                        <div class="flex items-center justify-between mb-2">
-                            <h3 class="font-semibold text-[12px] text-on-surface-variant uppercase tracking-wider">Attendance Categories</h3>
-                            <span class="text-[10px] font-bold text-secondary bg-secondary/15 px-2.5 py-0.5 rounded-full border border-secondary/20">PIE CHART</span>
-                        </div>
-                        <div class="flex items-center gap-4 flex-1">
-                            <div id="analytics-pie-chart-container" class="w-36 h-36 flex-shrink-0">
-                                <!-- Dynamically generated SVG Pie chart -->
-                            </div>
-                            <div id="analytics-pie-legend" class="flex-grow space-y-1 text-[11px] font-semibold">
-                                <!-- Legends dynamically filled -->
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
                 <!-- Heatmap + Subject list -->
                 <div class="grid grid-cols-5 gap-5">
                     <div class="glass-card rounded-2xl p-5 col-span-3">
@@ -1255,18 +1199,12 @@
                     
                     <div class="grid grid-cols-2 gap-3">
                         <div class="bg-surface-container-low p-2.5 rounded-lg border border-outline-variant/20 flex flex-col justify-center">
-                            <p class="text-[9px] text-on-surface-variant font-bold uppercase tracking-wider mb-1">Semester Start</p>
-                            <input type="date" id="ob-verify-start" onchange="onOcrDatesChange()" class="bg-zinc-900 border border-outline-variant rounded-lg text-[10px] text-on-surface px-2 py-1 focus:outline-none"/>
+                            <p class="text-[9px] text-on-surface-variant font-bold uppercase tracking-wider">Semester Range</p>
+                            <p class="text-[11px] font-extrabold text-on-surface mt-1"><span id="ob-verify-start">-</span> to <span id="ob-verify-end">-</span></p>
                         </div>
                         <div class="bg-surface-container-low p-2.5 rounded-lg border border-outline-variant/20 flex flex-col justify-center">
-                            <p class="text-[9px] text-on-surface-variant font-bold uppercase tracking-wider mb-1">Semester End</p>
-                            <input type="date" id="ob-verify-end" onchange="onOcrDatesChange()" class="bg-zinc-900 border border-outline-variant rounded-lg text-[10px] text-on-surface px-2 py-1 focus:outline-none"/>
-                        </div>
-                    </div>
-                    <div class="grid grid-cols-1 gap-3">
-                        <div class="bg-surface-container-low p-2.5 rounded-lg border border-outline-variant/20 flex items-center justify-between">
                             <p class="text-[9px] text-on-surface-variant font-bold uppercase tracking-wider">Calculated Working Days</p>
-                            <p class="text-[12px] font-extrabold text-secondary"><span id="ob-verify-working-days">0</span> Days</p>
+                            <p class="text-[12px] font-extrabold text-secondary mt-1"><span id="ob-verify-working-days">0</span> Days</p>
                         </div>
                     </div>
 
@@ -1358,169 +1296,29 @@
             </form>
         </div>
     </div>
-       <div class="fixed inset-0 z-[60] hidden" id="profileModal">
+
+    <!-- Profile Modal -->
+    <div class="fixed inset-0 z-[60] hidden" id="profileModal">
         <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" onclick="toggleModal('profileModal')"></div>
-        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg glass-card rounded-2xl shadow-2xl border border-outline-variant/50 max-h-[90vh] overflow-y-auto no-scrollbar">
-            <div class="p-6">
-                <div class="flex justify-between items-start mb-5">
-                    <div><h2 class="font-bold text-[18px] text-on-surface">Profile &amp; Settings</h2><p class="text-[13px] text-on-surface-variant mt-0.5">Update your profile and account preferences</p></div>
-                    <button aria-label="Close profile modal" class="text-on-surface-variant hover:text-on-surface p-1.5 rounded-xl hover:bg-surface-container-high" onclick="toggleModal('profileModal')"><span class="material-symbols-outlined text-[20px]">close</span></button>
-                </div>
-                <form id="profile-form" onsubmit="saveProfileSettings(event)" class="space-y-4">
-                    <!-- Profile Photo Selection -->
-                    <div class="flex items-center gap-4 mb-4 bg-surface-container-high/30 p-3 rounded-2xl border border-outline-variant/30">
-                        <div class="relative group cursor-pointer" onclick="document.getElementById('form-profile-photo-input').click()">
-                            <img id="form-profile-photo-img" class="w-14 h-14 rounded-full object-cover border border-outline-variant bg-surface-container-high" src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=200&auto=format&fit=crop" alt="Profile Photo"/>
-                            <div class="absolute inset-0 bg-black/60 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                <span class="material-symbols-outlined text-white text-[16px]">photo_camera</span>
-                            </div>
-                        </div>
-                        <div class="flex-1">
-                            <p class="font-bold text-xs text-on-surface">Profile Photo</p>
-                            <p class="text-[9px] text-on-surface-variant mt-0.5 uppercase tracking-wider">Tap image to upload new</p>
-                            <input type="file" id="form-profile-photo-input" class="hidden" accept="image/*" onchange="handleProfilePhotoUpload(event)"/>
-                        </div>
-                    </div>
-                    <!-- Row 1: Name -->
-                    <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Full Name</label><input aria-label="Full name" type="text" id="form-profile-name" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-3 focus:border-primary focus:outline-none" required/></div>
-                    <!-- Row 2: Roll Number + Register Number -->
-                    <div class="grid grid-cols-2 gap-3">
-                        <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Roll Number</label><input aria-label="Roll number" type="text" id="form-profile-roll" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-3 focus:border-primary focus:outline-none" placeholder="e.g. 21CS001"/></div>
-                        <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Register Number</label><input aria-label="Register number" type="text" id="form-profile-register-num" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-3 focus:border-primary focus:outline-none" placeholder="e.g. 123456789"/></div>
-                    </div>
-                    <!-- Row 3: Year + Section -->
-                    <div class="grid grid-cols-2 gap-3">
-                        <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Year</label><input aria-label="Academic year" type="text" id="form-profile-year" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-3 focus:border-primary focus:outline-none" placeholder="e.g. 2nd Year"/></div>
-                        <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Section</label><input aria-label="Section" type="text" id="form-profile-section" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-3 focus:border-primary focus:outline-none" placeholder="e.g. A"/></div>
-                    </div>
-                    <!-- Row 4: Branch + College -->
-                    <div class="grid grid-cols-2 gap-3">
-                        <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Branch / Department</label><input aria-label="Branch" type="text" id="form-profile-branch" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-3 focus:border-primary focus:outline-none" placeholder="e.g. CS"/></div>
-                        <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">College Name</label><input aria-label="College name" type="text" id="form-profile-college" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-3 focus:border-primary focus:outline-none" placeholder="Vishnu Institute of Tech"/></div>
-                    </div>
-                    <!-- Row 5: University -->
-                    <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">University Name</label><input aria-label="University name" type="text" id="form-profile-university" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-3 focus:border-primary focus:outline-none" placeholder="e.g. JNTUK"/></div>
-                    <!-- Row 6: Semester + Target -->
-                    <div class="grid grid-cols-2 gap-3">
-                        <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Academic Term</label>
-                            <select aria-label="Academic term" id="form-profile-term" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-3 focus:border-primary focus:outline-none">
-                                <option value="Semester 1 (Autumn)">Semester 1 (Autumn)</option><option value="Semester 2 (Spring)">Semester 2 (Spring)</option>
-                                <option value="Semester 3 (Autumn)">Semester 3 (Autumn)</option><option value="Semester 4 (Spring)">Semester 4 (Spring)</option>
-                                <option value="Semester 5 (Autumn)">Semester 5 (Autumn)</option><option value="Semester 6 (Spring)">Semester 6 (Spring)</option>
-                                <option value="Semester 7 (Autumn)">Semester 7 (Autumn)</option><option value="Semester 8 (Spring)">Semester 8 (Spring)</option>
-                            </select></div>
-                        <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Target Attendance (%)</label><input aria-label="Target attendance percentage" type="number" min="50" max="99" id="form-profile-target" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-3 focus:border-primary focus:outline-none" required/></div>
-                    </div>
-                    
-                    <!-- Preferences sub-panel -->
-                    <div class="bg-surface-container-high/30 p-3.5 rounded-2xl border border-outline-variant/30 space-y-3">
-                        <p class="text-[9px] font-bold text-primary uppercase tracking-wider">App Preferences & Security</p>
-                        
-                        <div class="flex items-center justify-between">
-                            <div>
-                                <p class="text-[12px] font-bold text-on-surface">PIN Lock Security</p>
-                                <p class="text-[9px] text-on-surface-variant">Require a 4-digit code to open the app</p>
-                            </div>
-                            <input type="checkbox" id="form-profile-pin-enabled" class="rounded border-outline-variant bg-zinc-900 text-primary focus:ring-primary w-4.5 h-4.5"/>
-                        </div>
-                        <div class="flex items-center justify-between">
-                            <div>
-                                <p class="text-[12px] font-bold text-on-surface">Security PIN Code</p>
-                                <p class="text-[9px] text-on-surface-variant">Set your 4-digit secure access PIN</p>
-                            </div>
-                            <input type="password" maxlength="4" placeholder="1234" id="form-profile-pin-code" class="w-20 bg-zinc-900 border border-outline-variant rounded-xl text-center text-xs text-on-surface px-2 py-1 focus:outline-none focus:border-primary"/>
-                        </div>
-                        <div class="flex items-center justify-between">
-                            <div>
-                                <p class="text-[12px] font-bold text-on-surface">Color Palette Accent</p>
-                                <p class="text-[9px] text-on-surface-variant">Personalize the application main accent</p>
-                            </div>
-                            <select id="form-profile-accent" class="bg-zinc-900 border border-outline-variant rounded-xl text-xs text-on-surface px-2 py-1 focus:outline-none">
-                                <option value="purple">Vibrant Purple</option>
-                                <option value="green">Emerald Green</option>
-                                <option value="amber">Warm Amber</option>
-                                <option value="cyan">Neon Cyan</option>
-                            </select>
-                        </div>
-                        <div class="flex items-center justify-between">
-                            <div>
-                                <p class="text-[12px] font-bold text-on-surface">Theme Mode</p>
-                                <p class="text-[9px] text-on-surface-variant">Choose Dark Mode or Light Mode</p>
-                            </div>
-                            <select id="form-profile-theme" class="bg-zinc-900 border border-outline-variant rounded-xl text-xs text-on-surface px-2 py-1 focus:outline-none">
-                                <option value="dark">Dark Mode</option>
-                                <option value="light">Light Mode</option>
-                            </select>
-                        </div>
-                        <div class="flex items-center justify-between">
-                            <div>
-                                <p class="text-[12px] font-bold text-on-surface">Home Widget Preview</p>
-                                <p class="text-[9px] text-on-surface-variant">Show home-screen interactive widget floating overlay</p>
-                            </div>
-                            <input type="checkbox" id="form-profile-widget-enabled" class="rounded border-outline-variant bg-zinc-900 text-primary focus:ring-primary w-4.5 h-4.5" onchange="toggleFloatingWidget(this.checked)"/>
-                        </div>
-                        <div class="flex items-center justify-between">
-                            <div>
-                                <p class="text-[12px] font-bold text-on-surface">Language Translation</p>
-                                <p class="text-[9px] text-on-surface-variant">Select interface text language</p>
-                            </div>
-                            <select id="form-profile-lang" class="bg-zinc-900 border border-outline-variant rounded-xl text-xs text-on-surface px-2 py-1 focus:outline-none">
-                                <option value="en">English (US)</option>
-                                <option value="te">Telugu (తెలుగు)</option>
-                                <option value="hi">Hindi (हिन्दी)</option>
-                                <option value="es">Spanish (Español)</option>
-                            </select>
-                        </div>
-                    </div>
-                    
-                    <div class="flex flex-wrap gap-2 pt-2">
-                        <button type="submit" class="flex-1 min-w-[120px] py-2.5 bg-primary text-on-primary rounded-xl font-bold text-sm active:scale-95 transition-all">Save Changes</button>
-                        <button type="button" onclick="handleAuthSignOut()" class="px-4 py-2.5 bg-surface-container-high text-on-surface border border-outline-variant/60 rounded-xl font-bold text-sm hover:bg-surface-container-highest transition-all">Sign Out</button>
-                        <button type="button" onclick="resetAppData()" class="px-4 py-2.5 bg-error/10 text-error border border-error/20 rounded-xl font-bold text-sm hover:bg-error/20 transition-all">Reset</button>
-                        <button type="button" onclick="deleteUserAccount()" class="px-4 py-2.5 bg-error/20 text-error border border-error/30 rounded-xl font-bold text-sm hover:bg-error/30 transition-all">Delete Account</button>
-                    </div>
-                </form>
-
-                <!-- Change Password Section -->
-                <div class="mt-5 pt-4 border-t border-outline-variant/30">
-                    <h3 class="text-[12px] font-bold text-on-surface-variant uppercase tracking-wider mb-3">Change Password</h3>
-                    <form id="change-password-form" onsubmit="handleChangePassword(event)" class="space-y-3">
-                        <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Current Password</label><input aria-label="Current password" type="password" id="cp-current" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none" placeholder="Current password" required/></div>
-                        <div class="grid grid-cols-2 gap-3">
-                            <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">New Password</label><input aria-label="New password" type="password" id="cp-new" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none" placeholder="Min 8 chars + 1 digit" required/></div>
-                            <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Confirm New</label><input aria-label="Confirm new password" type="password" id="cp-confirm" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none" placeholder="Repeat new password" required/></div>
-                        </div>
-                        <button type="submit" class="w-full py-2.5 bg-surface-container-high border border-outline-variant/60 text-on-surface rounded-xl font-bold text-sm active:scale-95">Update Password</button>
-                    </form>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Forgot Password Modal -->
-    <div class="fixed inset-0 z-[80] hidden" id="forgotPasswordModal">
-        <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" onclick="toggleModal('forgotPasswordModal')"></div>
-        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-sm glass-card rounded-2xl p-6 shadow-2xl border border-outline-variant/50">
+        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md glass-card rounded-2xl p-6 shadow-2xl border border-outline-variant/50">
             <div class="flex justify-between items-start mb-5">
-                <div><h2 class="font-bold text-[18px] text-on-surface">Forgot Password</h2><p class="text-[13px] text-on-surface-variant mt-0.5">Enter your email to receive a reset token</p></div>
-                <button aria-label="Close forgot password modal" class="text-on-surface-variant hover:text-on-surface p-1.5 rounded-xl hover:bg-surface-container-high" onclick="toggleModal('forgotPasswordModal')"><span class="material-symbols-outlined text-[20px]">close</span></button>
+                <div><h2 class="font-bold text-[18px] text-on-surface">Profile & Settings</h2><p class="text-[13px] text-on-surface-variant mt-0.5">Update goals and account preferences</p></div>
+                <button class="text-on-surface-variant hover:text-on-surface p-1.5 rounded-xl hover:bg-surface-container-high" onclick="toggleModal('profileModal')"><span class="material-symbols-outlined text-[20px]">close</span></button>
             </div>
-            <!-- Step 1: Email -->
-            <div id="fp-step-email">
-                <form onsubmit="handleForgotPassword(event)" class="space-y-4">
-                    <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Email Address</label><input aria-label="Email address for password reset" type="email" id="fp-email" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-3 focus:border-primary focus:outline-none" placeholder="your@email.com" required/></div>
-                    <button type="submit" class="w-full py-2.5 bg-primary text-on-primary rounded-xl font-bold text-sm">Send Reset Token</button>
-                </form>
-            </div>
-            <!-- Step 2: Token + New Password -->
-            <div id="fp-step-reset" class="hidden space-y-4">
-                <p class="text-[12px] text-secondary bg-secondary/10 rounded-xl p-3 border border-secondary/20">Reset token sent! In dev mode, check the server console. Paste the token below.</p>
-                <form onsubmit="handleResetPassword(event)" class="space-y-3">
-                    <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Reset Token</label><input aria-label="Password reset token" type="text" id="fp-token" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none" placeholder="Paste token from console" required/></div>
-                    <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">New Password</label><input aria-label="New password" type="password" id="fp-new-password" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none" placeholder="Min 8 chars + 1 digit" required/></div>
-                    <button type="submit" class="w-full py-2.5 bg-primary text-on-primary rounded-xl font-bold text-sm">Reset Password</button>
-                </form>
-            </div>
+            <form id="profile-form" onsubmit="saveProfileSettings(event)" class="space-y-4">
+                <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Student Name</label><input type="text" id="form-profile-name" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-3 focus:border-primary focus:outline-none" required/></div>
+                <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Target Attendance (%)</label><input type="number" min="50" max="99" id="form-profile-target" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-3 focus:border-primary focus:outline-none" required/></div>
+                <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Academic Term</label>
+                    <select id="form-profile-term" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-3 focus:border-primary focus:outline-none">
+                        <option value="Semester 1 (Autumn)">Semester 1 (Autumn)</option><option value="Semester 2 (Spring)">Semester 2 (Spring)</option>
+                        <option value="Semester 3 (Autumn)">Semester 3 (Autumn)</option><option value="Semester 4 (Spring)">Semester 4 (Spring)</option>
+                    </select></div>
+                <div class="flex gap-3 pt-1">
+                    <button type="submit" class="flex-1 py-2.5 bg-primary text-on-primary rounded-xl font-bold text-sm active:scale-95">Save Changes</button>
+                    <button type="button" onclick="handleAuthSignOut()" class="px-4 py-2.5 bg-surface-container-high text-on-surface border border-outline-variant/60 rounded-xl font-bold text-sm">Sign Out</button>
+                    <button type="button" onclick="resetAppData()" class="px-4 py-2.5 bg-error/10 text-error border border-error/20 rounded-xl font-bold text-sm">Reset</button>
+                </div>
+            </form>
         </div>
     </div>
 
@@ -1560,131 +1358,6 @@
                     <span class="material-symbols-outlined text-[18px]">event_available</span> Create Leave Plan
                 </button>
             </form>
-        </div>
-    </div>
-
-    <!-- Subject Modal (NEW) -->
-    <div class="fixed inset-0 z-[60] hidden" id="subjectModal">
-        <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" onclick="toggleModal('subjectModal')"></div>
-        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md glass-card rounded-2xl p-6 shadow-2xl border border-outline-variant/50 max-h-[90vh] overflow-y-auto no-scrollbar">
-            <div class="flex justify-between items-start mb-5">
-                <div><h2 class="font-bold text-[18px] text-on-surface" id="subject-modal-title">Add Subject</h2><p class="text-[13px] text-on-surface-variant mt-0.5">Configure subject details</p></div>
-                <button class="text-on-surface-variant hover:text-on-surface p-1.5 rounded-xl hover:bg-surface-container-high" onclick="toggleModal('subjectModal')"><span class="material-symbols-outlined text-[20px]">close</span></button>
-            </div>
-            <form id="subject-form" onsubmit="saveSubject(event)" class="space-y-4">
-                <input type="hidden" id="edit-subject-id" value=""/>
-                <div>
-                    <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Subject Name</label>
-                    <input type="text" id="subject-form-name" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none" placeholder="e.g. Operating Systems" required/>
-                </div>
-                <div class="grid grid-cols-2 gap-3">
-                    <div>
-                        <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Subject Code</label>
-                        <input type="text" id="subject-form-code" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none" placeholder="e.g. CS-301"/>
-                    </div>
-                    <div>
-                        <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Faculty Name</label>
-                        <input type="text" id="subject-form-prof" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none" placeholder="e.g. Dr. Jane Doe"/>
-                    </div>
-                </div>
-                <div class="grid grid-cols-3 gap-2">
-                    <div>
-                        <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Credits</label>
-                        <input type="number" min="1" max="10" id="subject-form-credits" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none" value="3" required/>
-                    </div>
-                    <div>
-                        <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Type</label>
-                        <select id="subject-form-type" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none">
-                            <option value="Theory">Theory</option>
-                            <option value="Lab">Lab</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Target %</label>
-                        <input type="number" min="50" max="99" id="subject-form-goal" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none" value="75" required/>
-                    </div>
-                </div>
-                <div class="grid grid-cols-2 gap-3">
-                    <div>
-                        <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Weekly Classes</label>
-                        <input type="number" min="1" max="20" id="subject-form-weekly" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none" value="4"/>
-                    </div>
-                    <div>
-                        <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Total Planned</label>
-                        <input type="number" min="1" max="100" id="subject-form-total-planned" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none" value="40"/>
-                    </div>
-                </div>
-                <div>
-                    <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Color Accent</label>
-                    <div class="flex gap-2 flex-wrap" id="subject-form-colors"></div>
-                    <input type="hidden" id="subject-form-color-val" value="#7c4dff"/>
-                </div>
-                <button type="submit" class="w-full py-3 bg-primary text-on-primary rounded-xl font-bold text-sm active:scale-95 transition-all hover:bg-primary/90">Save Subject</button>
-            </form>
-        </div>
-    </div>
-
-    <!-- Security PIN Keypad Overlay -->
-    <div id="pinLockOverlay" class="fixed inset-0 z-[300] bg-background/98 backdrop-blur-md flex flex-col justify-center items-center hidden">
-        <div class="w-full max-w-[280px] text-center space-y-6">
-            <div class="space-y-1">
-                <span class="material-symbols-outlined text-primary text-[42px] animate-bounce">lock</span>
-                <h2 class="font-bold text-[18px] text-on-surface">Secure Access</h2>
-                <p id="pin-lock-prompt" class="text-[12px] text-on-surface-variant">Enter your 4-digit security PIN</p>
-            </div>
-            <!-- Pin Dots -->
-            <div class="flex justify-center gap-4 py-2">
-                <div class="w-3.5 h-3.5 rounded-full border-2 border-outline-variant/60 bg-transparent transition-all" id="pin-dot-1"></div>
-                <div class="w-3.5 h-3.5 rounded-full border-2 border-outline-variant/60 bg-transparent transition-all" id="pin-dot-2"></div>
-                <div class="w-3.5 h-3.5 rounded-full border-2 border-outline-variant/60 bg-transparent transition-all" id="pin-dot-3"></div>
-                <div class="w-3.5 h-3.5 rounded-full border-2 border-outline-variant/60 bg-transparent transition-all" id="pin-dot-4"></div>
-            </div>
-            <!-- Numeric Keypad -->
-            <div class="grid grid-cols-3 gap-3">
-                <button onclick="pressPinNum(1)" class="w-16 h-16 rounded-full bg-surface-container-high/40 hover:bg-surface-container-high border border-outline-variant/20 flex items-center justify-center font-bold text-xl text-on-surface active:scale-90 transition-all">1</button>
-                <button onclick="pressPinNum(2)" class="w-16 h-16 rounded-full bg-surface-container-high/40 hover:bg-surface-container-high border border-outline-variant/20 flex items-center justify-center font-bold text-xl text-on-surface active:scale-90 transition-all">2</button>
-                <button onclick="pressPinNum(3)" class="w-16 h-16 rounded-full bg-surface-container-high/40 hover:bg-surface-container-high border border-outline-variant/20 flex items-center justify-center font-bold text-xl text-on-surface active:scale-90 transition-all">3</button>
-                <button onclick="pressPinNum(4)" class="w-16 h-16 rounded-full bg-surface-container-high/40 hover:bg-surface-container-high border border-outline-variant/20 flex items-center justify-center font-bold text-xl text-on-surface active:scale-90 transition-all">4</button>
-                <button onclick="pressPinNum(5)" class="w-16 h-16 rounded-full bg-surface-container-high/40 hover:bg-surface-container-high border border-outline-variant/20 flex items-center justify-center font-bold text-xl text-on-surface active:scale-90 transition-all">5</button>
-                <button onclick="pressPinNum(6)" class="w-16 h-16 rounded-full bg-surface-container-high/40 hover:bg-surface-container-high border border-outline-variant/20 flex items-center justify-center font-bold text-xl text-on-surface active:scale-90 transition-all">6</button>
-                <button onclick="pressPinNum(7)" class="w-16 h-16 rounded-full bg-surface-container-high/40 hover:bg-surface-container-high border border-outline-variant/20 flex items-center justify-center font-bold text-xl text-on-surface active:scale-90 transition-all">7</button>
-                <button onclick="pressPinNum(8)" class="w-16 h-16 rounded-full bg-surface-container-high/40 hover:bg-surface-container-high border border-outline-variant/20 flex items-center justify-center font-bold text-xl text-on-surface active:scale-90 transition-all">8</button>
-                <button onclick="pressPinNum(9)" class="w-16 h-16 rounded-full bg-surface-container-high/40 hover:bg-surface-container-high border border-outline-variant/20 flex items-center justify-center font-bold text-xl text-on-surface active:scale-90 transition-all">9</button>
-                <button onclick="simulateBiometricUnlock()" class="w-16 h-16 rounded-full flex items-center justify-center text-primary active:scale-90 transition-all"><span class="material-symbols-outlined text-[28px]">fingerprint</span></button>
-                <button onclick="pressPinNum(0)" class="w-16 h-16 rounded-full bg-surface-container-high/40 hover:bg-surface-container-high border border-outline-variant/20 flex items-center justify-center font-bold text-xl text-on-surface active:scale-90 transition-all">0</button>
-                <button onclick="clearPinInput()" class="w-16 h-16 rounded-full flex items-center justify-center text-error active:scale-90 transition-all"><span class="material-symbols-outlined text-[22px]">backspace</span></button>
-            </div>
-            <p class="text-[11px] text-on-surface-variant">Biometric face/fingerprint simulation active</p>
-        </div>
-    </div>
-
-    <!-- FLOATING HOME WIDGET PREVIEW -->
-    <div id="floating-widget-preview" class="fixed right-5 bottom-20 z-40 w-64 glass-card rounded-2xl p-4 shadow-2xl border border-outline-variant hidden transition-all duration-300 transform scale-95 translate-y-4">
-        <div class="flex justify-between items-center border-b border-outline-variant/20 pb-2 mb-2">
-            <span class="text-[9px] font-extrabold uppercase tracking-widest text-primary flex items-center gap-1">
-                <span class="material-symbols-outlined text-[12px]">widgets</span> Home Widget
-            </span>
-            <button onclick="toggleFloatingWidget(false)" class="text-on-surface-variant hover:text-on-surface"><span class="material-symbols-outlined text-[14px]">close</span></button>
-        </div>
-        <div class="space-y-3">
-            <div class="flex justify-between items-center">
-                <div>
-                    <p id="widget-overall-pct" class="font-extrabold text-[22px] text-secondary">0%</p>
-                    <p class="text-[9px] text-on-surface-variant font-bold uppercase tracking-wider">Attendance</p>
-                </div>
-                <div class="text-right">
-                    <p id="widget-classes-rem" class="font-extrabold text-sm text-primary">0 Classes</p>
-                    <p class="text-[9px] text-on-surface-variant font-bold uppercase tracking-wider">Remaining</p>
-                </div>
-            </div>
-            <div class="bg-zinc-900/60 p-2.5 rounded-xl border border-outline-variant/30">
-                <p class="text-[8px] font-bold text-primary uppercase tracking-wider mb-1">Current Period</p>
-                <h4 id="widget-current-class" class="font-bold text-[11px] text-on-surface truncate">Free Period</h4>
-                <p id="widget-countdown" class="text-[10px] text-secondary font-semibold mt-0.5">00:00 remaining</p>
-            </div>
-            <div id="widget-warning-banner" class="hidden p-2 rounded-xl bg-error/15 text-error border border-error/20 text-[9px] font-semibold text-center animate-pulse">
-                ⚠️ Attendance below 75%!
-            </div>
         </div>
     </div>
 
@@ -1730,6 +1403,5 @@
     </div>
 
     <!-- Application Script Connection -->
-    <script type="module" src="app.js"></script>
 </body>
 </html>

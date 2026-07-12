@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: attendwise
+    env: python
+    buildCommand: ./build.sh
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port 10000
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: attendwise-db
+          property: connectionString
+      - key: PYTHON_VERSION
+        value: 3.10.12
+      - key: GEMINI_API_KEY
+        sync: false
+    autoDeploy: false
+
+databases:
+  - name: attendwise-db
+    databaseName: attendwise
+    user: attendwise
+    plan: free

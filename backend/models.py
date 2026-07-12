@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey, Date, Time, DateTime, Boolean, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Float, ForeignKey, Date, Time, DateTime, Boolean, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .database import Base
@@ -13,7 +13,13 @@ class User(Base):
     college = Column(String, nullable=True)
     branch = Column(String, nullable=True)
     semester = Column(String, nullable=True)
+    roll_number = Column(String, nullable=True)
+    section = Column(String, nullable=True)
+    year = Column(String, nullable=True)
+    register_number = Column(String, nullable=True)
+    university = Column(String, nullable=True)
     attendance_goal = Column(Float, default=75.0)
+    profile_photo = Column(Text, nullable=True)  # base64 or URL
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     subjects = relationship("Subject", back_populates="owner", cascade="all, delete-orphan")
@@ -37,6 +43,9 @@ class Subject(Base):
     credits = Column(Integer, default=3)
     color = Column(String, default="#7c4dff")
     minimum_required_attendance = Column(Float, default=75.0)
+    subject_type = Column(String, default="Theory")  # Theory or Lab
+    weekly_classes = Column(Integer, default=4)
+    total_planned_classes = Column(Integer, default=40)
 
     owner = relationship("User", back_populates="subjects")
     timetables = relationship("Timetable", back_populates="subject")
