@@ -1,0 +1,10 @@
+android/
+backend/
+twa-app/
+assets/
+dist/
+/attendwise.apk
+attendwise.db
+*.pdf
+.gemini/
+scripts/

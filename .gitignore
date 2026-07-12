@@ -7,3 +7,5 @@ backend/*.pyc
 .cortex/
 *.log
 *.db
+
+.vercel

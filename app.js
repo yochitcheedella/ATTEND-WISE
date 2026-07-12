@@ -38,16 +38,7 @@ function removeSplashScreen() {
     }
 }
 
-// Global Auth State Listener to sync backend access token
-if (supabase) {
-    supabase.auth.onAuthStateChange((event, session) => {
-        if (session) {
-            localStorage.setItem("access_token", session.access_token);
-        } else {
-            localStorage.removeItem("access_token");
-        }
-    });
-}
+
 
 // ============================================================================
 // GLOBAL FETCH INTERCEPTOR & OFFLINE DETECTION (Phase 1 & 2)
@@ -447,17 +438,27 @@ async function initAppState() {
         return;
     }
 
-    const { data: { session } } = await supabase.auth.getSession();
-    
-    if (!session) {
-        localStorage.removeItem("access_token");
-        showAuthScreen();
-        removeSplashScreen();
-        return;
+    try {
+        const { data, error } = await supabase.auth.getSession();
+        const session = data ? data.session : null;
+        
+        if (error || !session) {
+            // Check if we still have a valid FastAPI token anyway, some offline cases might work
+            const token = localStorage.getItem("access_token");
+            if (!token) {
+                showAuthScreen();
+                removeSplashScreen();
+                return;
+            }
+        }
+    } catch (e) {
+        console.warn("Session check failed", e);
+        if (!localStorage.getItem("access_token")) {
+            showAuthScreen();
+            removeSplashScreen();
+            return;
+        }
     }
-    
-    // Sync the local access token from the session before doing API requests
-    localStorage.setItem("access_token", session.access_token);
     
     try {
         const response = await fetch(`${API_BASE_URL}/state`, {
