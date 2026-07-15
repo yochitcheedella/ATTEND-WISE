@@ -1141,16 +1141,35 @@ def create_semester(
                 except Exception:
                     pass
 
-            # Bulk insert with raw SQL INSERT OR IGNORE to skip any duplicates silently
+            # Insert holidays using SQLAlchemy ORM to be 100% database-agnostic (works on both SQLite and PostgreSQL)
             if rows:
-                db.execute(
-                    text(
-                        "INSERT OR IGNORE INTO holidays (user_id, semester_id, date, name, type) "
-                        "VALUES (:uid, :sid, :dt, :nm, :tp)"
-                    ),
-                    [{"uid": user_id, "sid": sem_id, "dt": r[0], "nm": r[1], "tp": r[2]} for r in rows]
-                )
-                db.commit()
+                existing_holidays = db.query(models.Holiday).filter(
+                    models.Holiday.user_id == user_id,
+                    models.Holiday.semester_id == sem_id
+                ).all()
+                existing_dates = {h.date for h in existing_holidays}
+                
+                to_add_holidays = []
+                added_dates = set()
+                
+                for r in rows:
+                    try:
+                        hdate = date.fromisoformat(r[0])
+                        if hdate not in existing_dates and hdate not in added_dates:
+                            to_add_holidays.append(models.Holiday(
+                                user_id=user_id,
+                                semester_id=sem_id,
+                                date=hdate,
+                                name=r[1],
+                                type=r[2]
+                            ))
+                            added_dates.add(hdate)
+                    except Exception:
+                        pass
+                
+                if to_add_holidays:
+                    db.add_all(to_add_holidays)
+                    db.commit()
 
         except Exception as err:
             db.rollback()
@@ -1719,7 +1738,7 @@ def create_extra_class_session(
 # ============================================================================
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL   = "gemini-1.5-flash"
+GEMINI_MODEL   = "gemini-2.5-flash"
 GEMINI_URL     = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
 
 TIMETABLE_OCR_PROMPT = """You are an expert Indian engineering college timetable parser.
@@ -1814,26 +1833,45 @@ async def ocr_timetable(
 
     headers = {"Content-Type": "application/json"}
     
-    models_to_try = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash", "gemini-2.5-flash"]
+    models_to_try = [
+        "gemini-2.5-flash", 
+        "gemini-2.0-flash", 
+        "gemini-1.5-flash", 
+        "gemini-1.5-flash-latest", 
+        "gemini-1.5-pro", 
+        "gemini-1.5-pro-latest"
+    ]
     gemini_response = None
     last_error = None
     successful_model = None
 
     for model in models_to_try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-        try:
-            import urllib.request as ureq
-            req = ureq.Request(
-                url,
-                data=json.dumps(payload).encode("utf-8"),
-                headers=headers,
-                method="POST"
-            )
-            with ureq.urlopen(req, timeout=30) as resp:
-                gemini_response = json.loads(resp.read().decode("utf-8"))
-                successful_model = model
-                break
-        except Exception as e:
+        # Try both v1 and v1beta API endpoints to bypass region/key deprecations
+        for api_ver in ["v1", "v1beta"]:
+            url = f"https://generativelanguage.googleapis.com/{api_ver}/models/{model}:generateContent?key={api_key}"
+            try:
+                import urllib.request as ureq
+                req = ureq.Request(
+                    url,
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers=headers,
+                    method="POST"
+                )
+                with ureq.urlopen(req, timeout=30) as resp:
+                    gemini_response = json.loads(resp.read().decode("utf-8"))
+                    successful_model = model
+                    break
+            except Exception as e:
+                error_msg = str(e)
+                if hasattr(e, 'read'):
+                    try:
+                        error_msg = e.read().decode("utf-8")
+                    except Exception:
+                        pass
+                print(f"Gemini API call failed for model {model} ({api_ver}): {error_msg}")
+                last_error = error_msg
+        if gemini_response:
+            break
             error_msg = str(e)
             if hasattr(e, 'read'):
                 try:
@@ -1958,20 +1996,34 @@ async def ocr_attendance(
     }
 
     headers = {"Content-Type": "application/json"}
-    models_to_try = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash", "gemini-2.5-flash"]
+    models_to_try = [
+        "gemini-2.5-flash", 
+        "gemini-2.0-flash", 
+        "gemini-1.5-flash", 
+        "gemini-1.5-flash-latest", 
+        "gemini-1.5-pro", 
+        "gemini-1.5-pro-latest"
+    ]
     gemini_response = None
     last_error = None
 
     for model in models_to_try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-        try:
-            import urllib.request as ureq
-            req = ureq.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
-            with ureq.urlopen(req, timeout=30) as resp:
-                gemini_response = json.loads(resp.read().decode("utf-8"))
-                break
-        except Exception as e:
-            last_error = str(e)
+        for api_ver in ["v1", "v1beta"]:
+            url = f"https://generativelanguage.googleapis.com/{api_ver}/models/{model}:generateContent?key={api_key}"
+            try:
+                import urllib.request as ureq
+                req = ureq.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
+                with ureq.urlopen(req, timeout=30) as resp:
+                    gemini_response = json.loads(resp.read().decode("utf-8"))
+                    break
+            except Exception as e:
+                last_error = str(e)
+                if hasattr(e, 'read'):
+                    try: last_error = e.read().decode("utf-8")
+                    except Exception: pass
+                print(f"Gemini API call failed for model {model} ({api_ver}): {last_error}")
+        if gemini_response:
+            break
             if hasattr(e, 'read'):
                 try: last_error = e.read().decode("utf-8")
                 except Exception: pass
@@ -2085,21 +2137,35 @@ async def parse_calendar(
         }
     }
 
-    url = f"{GEMINI_URL}?key={api_key}"
-    headers = {"Content-Type": "application/json"}
-
+    models_to_try = [
+        "gemini-2.5-flash", 
+        "gemini-2.0-flash", 
+        "gemini-1.5-flash", 
+        "gemini-1.5-flash-latest", 
+        "gemini-1.5-pro", 
+        "gemini-1.5-pro-latest"
+    ]
     last_error = ""
     gemini_response = None
-    successful_model = GEMINI_MODEL
+    successful_model = None
 
-    try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=60)
-        if resp.status_code == 200:
-            gemini_response = resp.json()
-        else:
-            last_error = f"API returned HTTP {resp.status_code}: {resp.text}"
-    except Exception as e:
-        last_error = str(e)
+    for model in models_to_try:
+        for api_ver in ["v1", "v1beta"]:
+            url = f"https://generativelanguage.googleapis.com/{api_ver}/models/{model}:generateContent?key={api_key}"
+            try:
+                resp = requests.post(url, headers=headers, json=payload, timeout=60)
+                if resp.status_code == 200:
+                    gemini_response = resp.json()
+                    successful_model = model
+                    break
+                else:
+                    last_error = f"API returned HTTP {resp.status_code}: {resp.text}"
+                    print(f"Gemini API call failed for model {model} ({api_ver}): {last_error}")
+            except Exception as e:
+                last_error = str(e)
+                print(f"Gemini API call failed for model {model} ({api_ver}): {last_error}")
+        if gemini_response:
+            break
 
     if not gemini_response:
         raise HTTPException(status_code=500, detail=f"Gemini OCR failed: {last_error}")

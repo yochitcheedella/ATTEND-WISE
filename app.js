@@ -4587,9 +4587,29 @@ async function startCalendarScanning() {
         showToast("Calendar Scanned ✨", "Academic calendar data processed.", "check_circle");
         
         // Populate Verification Screen metrics — normalize dates to YYYY-MM-DD for <input type="date">
+        // Populate Verification Screen metrics — normalize dates to YYYY-MM-DD for <input type="date">
         document.getElementById("ob-verify-start").value = normalizeDateToISO(data.semesterStart) || "";
         document.getElementById("ob-verify-end").value = normalizeDateToISO(data.semesterEnd) || "";
-        document.getElementById("ob-verify-holidays").textContent = (data.holidays || []).length;
+        
+        // Calculate total holidays count (individual holiday dates + semester break dates + study holidays)
+        const totalHolDates = new Set((data.holidays || []).map(h => h.date));
+        const countDaysInRange = (ranges) => {
+            (ranges || []).forEach(r => {
+                if (r.start && r.end) {
+                    let d = new Date(r.start + "T00:00:00");
+                    const end = new Date(r.end + "T00:00:00");
+                    while (d <= end) {
+                        const dateStr = d.toISOString().split("T")[0];
+                        totalHolDates.add(dateStr);
+                        d.setDate(d.getDate() + 1);
+                    }
+                }
+            });
+        };
+        countDaysInRange(data.semesterBreak);
+        countDaysInRange(data.studyHolidays);
+
+        document.getElementById("ob-verify-holidays").textContent = totalHolDates.size;
         document.getElementById("ob-verify-mid-exams").textContent = (data.midExams || []).length;
         document.getElementById("ob-verify-final-exams").textContent = (data.examDates || []).length;
         
@@ -4600,7 +4620,7 @@ async function startCalendarScanning() {
             let workDays = 0;
             
             // Build set of holiday dates
-            const holDates = new Set(data.holidays.map(h => h.date));
+            const holDates = new Set((data.holidays || []).map(h => h.date));
             // Add exam dates to exclusions
             const addExclusion = (ranges) => {
                 ranges.forEach(r => {
