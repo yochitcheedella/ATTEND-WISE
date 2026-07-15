@@ -89,10 +89,6 @@ class SubjectBase(BaseModel):
 class SubjectCreate(SubjectBase):
     pass
 
-class SyncAttendanceRequest(BaseModel):
-    conducted: int
-    attended: int
-
 class Subject(SubjectBase):
     id: int
     user_id: int

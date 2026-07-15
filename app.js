@@ -941,7 +941,7 @@ async function saveSyncAttendance(e) {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
-                "Authorization": `Bearer ${localStorage.getItem('token')}`
+                "Authorization": `Bearer ${localStorage.getItem('access_token')}`
             },
             body: JSON.stringify({ conducted, attended })
         });
@@ -952,10 +952,10 @@ async function saveSyncAttendance(e) {
         }
         
         toggleModal("syncModal");
-        showToast("Attendance synced successfully!", "success");
+        showToast("Synced!", "Attendance synced successfully!", "check_circle");
         await fetchAllData();
     } catch (error) {
-        showToast(error.message, "error");
+        showToast("Sync Failed", error.message, "error");
     } finally {
         btn.disabled = false;
     }
@@ -965,7 +965,7 @@ async function handleSyncOcrUpload(e) {
     const file = e.target.files[0];
     if (!file) return;
     
-    showToast("Processing image with AI...", "info");
+    showToast("Processing...", "Reading image with AI...", "smart_toy");
     
     const formData = new FormData();
     formData.append("file", file);
@@ -973,7 +973,7 @@ async function handleSyncOcrUpload(e) {
     try {
         const response = await fetch(`${API_BASE_URL}/attendance/ocr`, {
             method: "POST",
-            headers: { "Authorization": `Bearer ${localStorage.getItem('token')}` },
+            headers: { "Authorization": `Bearer ${localStorage.getItem('access_token')}` },
             body: formData
         });
         
@@ -996,13 +996,13 @@ async function handleSyncOcrUpload(e) {
             document.getElementById("sync-form-conducted").value = match.conducted;
             document.getElementById("sync-form-attended").value = match.attended;
             updateSyncPreview();
-            showToast(`Extracted ${match.conducted} conducted, ${match.attended} attended`, "success");
+            showToast("Extracted!", `Found ${match.conducted} conducted, ${match.attended} attended`, "auto_awesome");
         } else {
-            showToast("No matching data found in image.", "warning");
+            showToast("No Match", "No matching subject data found in image.", "search_off");
         }
         
     } catch (err) {
-        showToast("Failed to process image", "error");
+        showToast("OCR Failed", "Failed to process the uploaded image.", "broken_image");
     }
     
     e.target.value = "";
