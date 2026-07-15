@@ -9,3 +9,7 @@ backend/*.pyc
 *.db
 
 .vercel
+
+# APK binaries - too large for GitHub. Distributed via GitHub Releases.
+*.apk
+*.idsig
