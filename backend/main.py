@@ -217,6 +217,64 @@ def ping():
     """Ultra-fast endpoint to wake up the Render free-tier server."""
     return {"status": "ok", "message": "pong"}
 
+@app.get("/debug/migrate")
+def debug_migrate(db: Session = Depends(get_db)):
+    import traceback
+    try:
+        from .database import SQLALCHEMY_DATABASE_URL as _db_url
+        logs = []
+        with engine.begin() as conn:
+            # subjects table
+            for col, coltype, default in [
+                ("minimum_required_attendance", "FLOAT", "75.0"),
+                ("subject_type", "TEXT", "'Theory'"),
+                ("weekly_classes", "INTEGER", "4"),
+                ("total_planned_classes", "INTEGER", "40"),
+                ("baseline_conducted", "INTEGER", "0"),
+                ("baseline_attended", "INTEGER", "0"),
+                ("current_conducted", "INTEGER", "0"),
+                ("current_attended", "INTEGER", "0"),
+                ("last_synced_at", "TIMESTAMP", "NULL"),
+            ]:
+                exists = _column_exists(conn, "subjects", col, _db_url)
+                logs.append(f"subjects.{col} exists: {exists}")
+                if not exists:
+                    conn.execute(text(f"ALTER TABLE subjects ADD COLUMN {col} {coltype} DEFAULT {default}"))
+                    logs.append(f"Added subjects.{col}")
+
+            # attendance table
+            exists = _column_exists(conn, "attendance", "source", _db_url)
+            logs.append(f"attendance.source exists: {exists}")
+            if not exists:
+                conn.execute(text("ALTER TABLE attendance ADD COLUMN source TEXT DEFAULT 'daily_tracker'"))
+                logs.append("Added attendance.source")
+
+            # semesters table
+            exists = _column_exists(conn, "semesters", "academic_calendar", _db_url)
+            logs.append(f"semesters.academic_calendar exists: {exists}")
+            if not exists:
+                conn.execute(text("ALTER TABLE semesters ADD COLUMN academic_calendar TEXT"))
+                logs.append("Added semesters.academic_calendar")
+
+            # users table
+            for col, coltype in [
+                ("roll_number", "TEXT"),
+                ("section", "TEXT"),
+                ("year", "TEXT"),
+                ("profile_photo", "TEXT"),
+                ("register_number", "TEXT"),
+                ("university", "TEXT"),
+                ("fcm_token", "TEXT"),
+            ]:
+                exists = _column_exists(conn, "users", col, _db_url)
+                logs.append(f"users.{col} exists: {exists}")
+                if not exists:
+                    conn.execute(text(f"ALTER TABLE users ADD COLUMN {col} {coltype}"))
+                    logs.append(f"Added users.{col}")
+        return {"status": "success", "logs": logs}
+    except Exception as e:
+        return {"status": "error", "error": str(e), "traceback": traceback.format_exc()}
+
 @app.get("/health", tags=["Health"])
 def health_check(db: Session = Depends(get_db)):
     try:
