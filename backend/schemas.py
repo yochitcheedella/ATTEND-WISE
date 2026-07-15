@@ -80,9 +80,18 @@ class SubjectBase(BaseModel):
     subject_type: str = "Theory"
     weekly_classes: int = 4
     total_planned_classes: int = 40
+    baseline_conducted: int = 0
+    baseline_attended: int = 0
+    current_conducted: int = 0
+    current_attended: int = 0
+    last_synced_at: Optional[datetime] = None
 
 class SubjectCreate(SubjectBase):
     pass
+
+class SyncAttendanceRequest(BaseModel):
+    conducted: int
+    attended: int
 
 class Subject(SubjectBase):
     id: int
@@ -141,6 +150,15 @@ class TimetableEntry(BaseModel):
 
 class TimetableSyncRequest(BaseModel):
     timetable: List[TimetableEntry]
+
+class SyncAttendanceRequest(BaseModel):
+    conducted: int
+    attended: int
+
+class OCRUploadResponse(BaseModel):
+    subject_name: Optional[str] = None
+    conducted: Optional[int] = None
+    attended: Optional[int] = None
 
 # --- LeavePlan Schemas ---
 class LeavePlanBase(BaseModel):

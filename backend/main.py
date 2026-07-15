@@ -5,7 +5,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from datetime import date, time, timedelta
+from datetime import date, time, timedelta, timezone, datetime
 import os
 import base64
 import requests
@@ -55,9 +55,18 @@ try:
             ("subject_type", "TEXT", "'Theory'"),
             ("weekly_classes", "INTEGER", "4"),
             ("total_planned_classes", "INTEGER", "40"),
+            ("baseline_conducted", "INTEGER", "0"),
+            ("baseline_attended", "INTEGER", "0"),
+            ("current_conducted", "INTEGER", "0"),
+            ("current_attended", "INTEGER", "0"),
+            ("last_synced_at", "TIMESTAMP", "NULL"),
         ]:
             if not _column_exists(conn, "subjects", col, _db_url):
                 conn.execute(text(f"ALTER TABLE subjects ADD COLUMN {col} {coltype} DEFAULT {default}"))
+
+        # attendance table
+        if not _column_exists(conn, "attendance", "source", _db_url):
+            conn.execute(text("ALTER TABLE attendance ADD COLUMN source TEXT DEFAULT 'daily_tracker'"))
 
         # semesters table
         if not _column_exists(conn, "semesters", "academic_calendar", _db_url):
@@ -210,10 +219,14 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
         year=user.year,
         attendance_goal=user.attendance_goal
     )
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
-    return new_user
+    try:
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        return new_user
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to create user profile: {str(e)}")
 
 @app.post("/auth/login", response_model=schemas.Token, tags=["Authentication"])
 @limiter.limit("10/minute")
@@ -279,6 +292,24 @@ def delete_subject(subject_id: int, current_user: models.User = Depends(auth.get
     db.delete(db_sub)
     db.commit()
     return {"message": "Subject and all related data deleted successfully"}
+
+@app.post("/subjects/{subject_id}/sync", response_model=schemas.Subject, tags=["Subjects"])
+def sync_subject_attendance(subject_id: int, request: schemas.SyncAttendanceRequest, current_user: models.User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    db_sub = db.query(models.Subject).filter(models.Subject.id == subject_id, models.Subject.user_id == current_user.id).first()
+    if not db_sub:
+        raise HTTPException(status_code=404, detail="Subject not found")
+    
+    try:
+        db_sub.baseline_conducted = request.conducted
+        db_sub.baseline_attended = request.attended
+        db_sub.last_synced_at = datetime.now(timezone.utc)
+        
+        db.commit()
+        db.refresh(db_sub)
+        return db_sub
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
 
 # --- Timetable Endpoints ---
 @app.post("/timetable", response_model=schemas.Timetable, tags=["Timetable"])
@@ -1830,6 +1861,105 @@ async def ocr_timetable(
         print("GEMINI ERROR:", error_msg)
         raise HTTPException(status_code=500, detail=f"Gemini OCR failed: {error_msg}")
 
+ATTENDANCE_OCR_PROMPT = """You are an expert OCR parser for student portals.
+Analyze the provided screenshot of the student attendance portal and extract the conducted and attended classes for all subjects.
+Return ONLY a valid JSON list of objects (no markdown, no explanations) with this exact structure:
+[
+  {
+    "subject_name": "Subject Name",
+    "conducted": 42,
+    "attended": 35
+  }
+]
+- Include all subjects present in the image.
+- `conducted` and `attended` MUST be integers.
+- If you see a percentage instead of raw numbers, and there is no raw number, try to infer or just output what is available, but raw numbers are preferred.
+"""
+
+@app.post("/attendance/ocr", tags=["Attendance"])
+async def ocr_attendance(
+    file: UploadFile = File(...),
+    current_user: models.User = Depends(auth.get_current_user)
+):
+    """
+    Upload a student portal screenshot.
+    Gemini AI will parse it and return a list of subjects with conducted/attended counts.
+    """
+    api_key = os.getenv("GEMINI_API_KEY", GEMINI_API_KEY)
+    if not api_key:
+        raise HTTPException(status_code=503, detail="Gemini API key not configured.")
+
+    file_bytes = await file.read()
+    if len(file_bytes) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File too large. Maximum size is 10MB.")
+
+    ALLOWED_MIME_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif", "application/pdf"}
+    mime_type = file.content_type or "image/png"
+    if file.filename and file.filename.lower().endswith(".pdf"):
+        mime_type = "application/pdf"
+    if mime_type not in ALLOWED_MIME_TYPES:
+        mime_type = "image/png"
+        
+    import base64
+    encoded = base64.b64encode(file_bytes).decode("utf-8")
+
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": ATTENDANCE_OCR_PROMPT},
+                    {
+                        "inlineData": {
+                            "mimeType": mime_type,
+                            "data": encoded
+                        }
+                    }
+                ]
+            }
+        ],
+        "generationConfig": {
+            "response_mime_type": "application/json",
+            "temperature": 0.1
+        }
+    }
+
+    headers = {"Content-Type": "application/json"}
+    models_to_try = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-2.5-flash-lite"]
+    gemini_response = None
+    last_error = None
+
+    for model in models_to_try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+        try:
+            import urllib.request as ureq
+            req = ureq.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
+            with ureq.urlopen(req, timeout=30) as resp:
+                gemini_response = json.loads(resp.read().decode("utf-8"))
+                break
+        except Exception as e:
+            last_error = str(e)
+            if hasattr(e, 'read'):
+                try: last_error = e.read().decode("utf-8")
+                except Exception: pass
+
+    if not gemini_response:
+        raise HTTPException(status_code=500, detail=f"Gemini OCR failed: {last_error}")
+
+    try:
+        candidates = gemini_response.get("candidates", [])
+        if not candidates:
+            raise HTTPException(status_code=500, detail="Gemini returned no candidates")
+
+        raw_text = candidates[0]["content"]["parts"][0]["text"]
+        parsed = json.loads(raw_text)
+        if not isinstance(parsed, list):
+            raise ValueError("Expected a JSON list")
+            
+        return parsed
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to parse Gemini response: {str(e)}")
+
+
 CALENDAR_OCR_PROMPT = """You are an expert Indian academic calendar parser for engineering colleges.
 Analyze the provided academic calendar image or PDF and extract ALL key dates and events.
 
@@ -1989,9 +2119,13 @@ def google_login(body: dict, db: Session = Depends(get_db)):
             semester="Semester 1 (Autumn)",
             attendance_goal=75.0
         )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
+        try:
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(status_code=500, detail=f"Failed to create user profile: {str(e)}")
     
     access_token_expires = auth.timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = auth.create_access_token(
@@ -2354,4 +2488,45 @@ def send_push_notification(fcm_token: str, title: str, body: str):
         )
         messaging.send(message)
     except Exception as e:
-        print(f'Failed to send FCM: {e}')
+        print(f'Failed to send FCM: {e}', flush=True)
+
+import asyncio
+from datetime import datetime, timedelta
+from .database import SessionLocal
+
+async def notification_scheduler():
+    while True:
+        try:
+            db = SessionLocal()
+            now = datetime.now()
+            current_day = now.strftime("%a")
+            
+            start_window = (now + timedelta(minutes=9)).time()
+            end_window = (now + timedelta(minutes=11)).time()
+            
+            upcoming_classes = db.query(models.Timetable).join(models.User).filter(
+                models.Timetable.day == current_day,
+                models.Timetable.start_time >= start_window,
+                models.Timetable.start_time <= end_window
+            ).all()
+            
+            for entry in upcoming_classes:
+                print(f"Found upcoming class: {entry.subject.name} for user {entry.owner.email}", flush=True)
+                if entry.owner.fcm_token and entry.subject:
+                    print(f"Triggering push to {entry.owner.fcm_token}", flush=True)
+                    send_push_notification(
+                        fcm_token=entry.owner.fcm_token,
+                        title="Upcoming Class",
+                        body=f"{entry.subject.name} starts in 10 minutes ({entry.start_time.strftime('%H:%M')}). Room: {entry.room or 'TBA'}."
+                    )
+            
+            db.close()
+        except Exception as e:
+            print(f"Scheduler error: {e}", flush=True)
+            
+        await asyncio.sleep(30)
+
+@app.on_event("startup")
+async def startup_event():
+    print("Starting background scheduler...", flush=True)
+    asyncio.create_task(notification_scheduler())

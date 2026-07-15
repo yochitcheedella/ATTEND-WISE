@@ -2,15 +2,44 @@ import { StatusBar, Style } from '@capacitor/status-bar';
 import { SplashScreen } from '@capacitor/splash-screen';
 import { Keyboard, KeyboardResize } from '@capacitor/keyboard';
 import { createClient } from '@supabase/supabase-js';
+import { Preferences } from '@capacitor/preferences';
 
 // AttendWise AI Student Attendance Companion - Core Business Logic & State Engine
 // Supports offline-first LocalCache (localStorage) and real calculations.
 
+function escapeHTML(str) {
+    if (typeof str !== 'string') return str;
+    return str.replace(/[&<>'"]/g, 
+        tag => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            "'": '&#39;',
+            '"': '&quot;'
+        }[tag] || tag)
+    );
+}
+
 const API_BASE_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || window.location.origin;
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+const capacitorStorageAdapter = {
+    getItem: async (key) => {
+        const { value } = await Preferences.get({ key });
+        return value;
+    },
+    setItem: async (key, value) => {
+        await Preferences.set({ key, value });
+    },
+    removeItem: async (key) => {
+        await Preferences.remove({ key });
+    }
+};
+
 const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey, {
     auth: {
+        storage: capacitorStorageAdapter,
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: true,
@@ -22,9 +51,7 @@ try {
     StatusBar.setStyle({ style: Style.Dark });
     StatusBar.setOverlaysWebView({ overlay: false });
     Keyboard.setResizeMode({ mode: KeyboardResize.Native });
-    setTimeout(() => {
-        SplashScreen.hide();
-    }, 500); // Hide native splash screen quickly to show our beautiful CSS splash
+    // Note: SplashScreen.hide() is deliberately moved to after auth check in initAppState
 } catch (e) {
     console.warn("Capacitor plugins not available in web mode.");
 }
@@ -56,12 +83,15 @@ window.fetch = async function(...args) {
             showToast("Session Expired", "Please log in again.", "lock");
             
             // Wipe token and force redirect to login
-            localStorage.removeItem("attendwise_token");
-            document.getElementById("main-content").classList.add("hidden");
-            document.getElementById("desktop-sidebar").classList.add("hidden");
-            document.getElementById("mobile-nav").classList.add("hidden");
-            const screen = document.getElementById("auth-screen");
-            if (screen) screen.classList.remove("hidden");
+            localStorage.removeItem("access_token");
+            showAuthScreen();
+            
+            const mainContent = document.getElementById("main-content");
+            if (mainContent) mainContent.classList.add("hidden");
+            const sidebar = document.getElementById("desktop-sidebar");
+            if (sidebar) sidebar.classList.add("hidden");
+            const mobileSidebar = document.getElementById("mobile-sidebar-overlay");
+            if (mobileSidebar) mobileSidebar.classList.add("hidden");
         }
         return response;
     } catch (err) {
@@ -171,6 +201,8 @@ function generateMockAttendanceLogs() {
 // 2. STATE STORAGE & INITIALIZATION
 // ============================================================================
 
+let authState = "Initializing";
+
 let appState = {
     profile: {
         name: "Sarah Jenkins",
@@ -239,6 +271,9 @@ async function quickLoginDemo() {
 
 async function handleAuthSignIn(e) {
     e.preventDefault();
+    console.info("[Auth] Login requested.");
+    authState = "Authenticating";
+    
     const email = document.getElementById("signin-email").value.trim();
     const password = document.getElementById("signin-password").value;
     
@@ -255,25 +290,35 @@ async function handleAuthSignIn(e) {
             body: formData
         });
         
+        console.info(`[Auth] Response received for login. Status: ${response.status}`);
+        
         if (response.ok) {
             const data = await response.json();
             localStorage.setItem("access_token", data.access_token);
+            console.info("[Auth] Session saved.");
+            authState = "Authenticated";
             showToast("Login Successful", "Welcome to AttendWise!", "check_circle");
             await initAppState();
             if (window.capacitorPushNotifications) registerPushNotifications();
             tabNavigation("dashboard");
         } else {
             const err = await response.json();
-            showToast("Login Failed", err.detail || "Incorrect email or password", "error");
+            authState = "Unauthenticated";
+            const errorMessage = err.detail || "Incorrect email or password";
+            console.warn(`[Auth] Login failed: ${errorMessage}`);
+            showToast("Login Failed", errorMessage, "error");
         }
     } catch (err) {
-        showToast("Error", "Could not connect to auth server", "error");
-        console.error(err);
+        authState = "Offline";
+        console.error("[Auth] Network error during login:", err);
+        showToast("Network Unavailable", "Could not connect to the authentication server.", "error");
     }
 }
 
 async function handleAuthSignUp(e) {
     e.preventDefault();
+    console.info("[Auth] Signup requested.");
+    authState = "Authenticating";
     const name = document.getElementById("signup-name").value.trim();
     const email = document.getElementById("signup-email").value.trim();
     const password = document.getElementById("signup-password").value;
@@ -283,6 +328,7 @@ async function handleAuthSignUp(e) {
     const semester = document.getElementById("signup-semester").value;
     
     if (password.length < 6) {
+        authState = "Unauthenticated";
         showToast("Weak Password", "Password must be at least 6 characters.", "warning");
         return;
     }
@@ -310,7 +356,10 @@ async function handleAuthSignUp(e) {
             })
         });
         
+        console.info(`[Auth] Response received for signup. Status: ${response.status}`);
+        
         if (response.ok) {
+            console.info("[Auth] Signup successful. Attempting auto-login.");
             showToast("Registration Successful", "Logging you in...", "check_circle");
             // Auto login after registration
             const formData = new URLSearchParams();
@@ -328,27 +377,38 @@ async function handleAuthSignUp(e) {
             if (loginRes.ok) {
                 const data = await loginRes.json();
                 localStorage.setItem("access_token", data.access_token);
+                console.info("[Auth] Session saved after signup.");
+                authState = "Authenticated";
                 await initAppState();
                 hideAuthScreen();
                 tabNavigation("dashboard");
             } else {
+                console.warn("[Auth] Auto-login failed. Redirecting to manual signin.");
+                authState = "Unauthenticated";
                 switchAuthTab("signin");
                 document.getElementById("signin-email").value = email;
                 document.getElementById("signin-password").value = password;
             }
         } else {
             const err = await response.json();
-            showToast("Registration Failed", err.message || err.detail || "Could not register account", "error");
+            authState = "Unauthenticated";
+            const errorMessage = err.message || err.detail || "Could not register account";
+            console.warn(`[Auth] Registration failed: ${errorMessage}`);
+            showToast("Registration Failed", errorMessage, "error");
         }
     } catch (err) {
-        showToast("Error", "Could not connect to auth server", "error");
-        console.error(err);
+        authState = "Offline";
+        console.error("[Auth] Network error during signup:", err);
+        showToast("Network Unavailable", "Could not connect to auth server", "error");
     }
 }
 
-function handleAuthSignOut() {
+async function handleAuthSignOut() {
     if (confirm("Are you sure you want to sign out?")) {
         localStorage.removeItem("access_token");
+        if (supabase) {
+            await supabase.auth.signOut();
+        }
         location.reload();
     }
 }
@@ -408,6 +468,8 @@ async function handleGoogleSignIn() {
     }
     
     try {
+        console.info("[Auth] Google Sign-In requested.");
+        authState = "Authenticating";
         showToast("Google Sign-In", "Redirecting to Google...", "insights");
         const { error } = await supabase.auth.signInWithOAuth({
             provider: 'google',
@@ -416,8 +478,13 @@ async function handleGoogleSignIn() {
             }
         });
         
-        if (error) throw error;
+        if (error) {
+            authState = "Unauthenticated";
+            throw error;
+        }
     } catch (err) {
+        authState = "Offline";
+        console.error("[Auth] Google OAuth Failed:", err);
         showToast("OAuth Failed", err.message || "Could not start Google Sign-In", "error");
     }
 }
@@ -425,39 +492,61 @@ async function handleGoogleSignIn() {
 
 // Initial state loader
 async function initAppState() {
+    console.info("[App] initAppState starting. Current authState:", authState);
+    let sessionValid = false;
+
+    if (!supabase) {
+        console.warn("[App] Supabase missing. Falling back to FastAPI token check.");
+        const token = localStorage.getItem("access_token");
+        if (token) {
+            authState = "Authenticated";
+            sessionValid = true;
+        } else {
+            authState = "Unauthenticated";
+        }
+    } else {
+        try {
+            const { data, error } = await supabase.auth.getSession();
+            const session = data ? data.session : null;
+            
+            if (error || !session) {
+                console.info("[Auth] No active Supabase session. Checking local FastAPI token.");
+                const token = localStorage.getItem("access_token");
+                if (token) {
+                    console.info("[Auth] Session restored via local FastAPI token.");
+                    authState = "Authenticated";
+                    sessionValid = true;
+                } else {
+                    authState = "Unauthenticated";
+                }
+            } else {
+                console.info("[Auth] Session restored via Supabase.");
+                authState = "Authenticated";
+                sessionValid = true;
+            }
+        } catch (e) {
+            console.warn("[Auth] Session check failed, attempting fallback recovery.", e);
+            if (localStorage.getItem("access_token")) {
+                authState = "Offline";
+                sessionValid = true;
+            } else {
+                authState = "Unauthenticated";
+            }
+        }
+    }
+
+    if (!sessionValid) {
+        showAuthScreen();
+        try { await SplashScreen.hide(); } catch(err){}
+        removeSplashScreen();
+        return false;
+    }
+    
     // Check PIN Lock
     const pinEnabled = localStorage.getItem("pin_enabled") === "true";
     if (pinEnabled) {
         const overlay = document.getElementById("pinLockOverlay");
         if (overlay) overlay.classList.remove("hidden");
-    }
-
-    if (!supabase) {
-        showAuthScreen();
-        removeSplashScreen();
-        return;
-    }
-
-    try {
-        const { data, error } = await supabase.auth.getSession();
-        const session = data ? data.session : null;
-        
-        if (error || !session) {
-            // Check if we still have a valid FastAPI token anyway, some offline cases might work
-            const token = localStorage.getItem("access_token");
-            if (!token) {
-                showAuthScreen();
-                removeSplashScreen();
-                return;
-            }
-        }
-    } catch (e) {
-        console.warn("Session check failed", e);
-        if (!localStorage.getItem("access_token")) {
-            showAuthScreen();
-            removeSplashScreen();
-            return;
-        }
     }
     
     try {
@@ -549,7 +638,9 @@ async function initAppState() {
     }
     
     // Check finished, ready to reveal the app
+    try { await SplashScreen.hide(); } catch(err){}
     removeSplashScreen();
+    return true;
 }
 
 async function saveStateToLocalStorage() {
@@ -644,7 +735,18 @@ function triggerGreetingNotification() {
 
 let currentTab = "dashboard";
 
+function protectRoutes() {
+    if (authState !== "Authenticated" && authState !== "Offline") {
+        console.warn("[Auth] Blocked access to protected route. Redirecting to login.");
+        showAuthScreen();
+        return false;
+    }
+    return true;
+}
+
 function tabNavigation(tabId) {
+    if (!protectRoutes()) return;
+    
     currentTab = tabId;
     
     // Hide all views
@@ -761,6 +863,151 @@ function toggleModal(modalId) {
     if (modal) modal.classList.toggle("hidden");
 }
 
+// --- Sync Modal Functions ---
+function openSyncModal(subjectId) {
+    const subject = appState.subjects.find(s => s.id == subjectId);
+    if (!subject) return;
+    document.getElementById("sync-subject-id").value = subjectId;
+    document.getElementById("sync-modal-title").innerText = `Sync ${subject.name}`;
+    document.getElementById("sync-form-conducted").value = "";
+    document.getElementById("sync-form-attended").value = "";
+    document.getElementById("sync-preview-alert").classList.add("hidden");
+    document.getElementById("sync-submit-btn").disabled = true;
+    toggleModal('syncModal');
+}
+
+function updateSyncPreview() {
+    const conducted = parseInt(document.getElementById("sync-form-conducted").value);
+    const attended = parseInt(document.getElementById("sync-form-attended").value);
+    const subjectId = document.getElementById("sync-subject-id").value;
+    const btn = document.getElementById("sync-submit-btn");
+    const preview = document.getElementById("sync-preview-alert");
+    const previewText = document.getElementById("sync-preview-text");
+    
+    if (isNaN(conducted) || isNaN(attended)) {
+        btn.disabled = true;
+        preview.classList.add("hidden");
+        return;
+    }
+    
+    const subject = appState.subjects.find(s => s.id == subjectId);
+    if (!subject) return;
+    
+    const currConducted = subject.current_conducted || 0;
+    const currAttended = subject.current_attended || 0;
+    
+    if (conducted < currConducted) {
+        preview.classList.remove("hidden");
+        previewText.innerHTML = `<span class="text-error font-bold">Error:</span> Cannot reduce conducted classes (currently ${currConducted}).`;
+        btn.disabled = true;
+        return;
+    }
+    
+    if (attended > conducted) {
+        preview.classList.remove("hidden");
+        previewText.innerHTML = `<span class="text-error font-bold">Error:</span> Attended cannot exceed conducted.`;
+        btn.disabled = true;
+        return;
+    }
+    
+    const diffConducted = conducted - currConducted;
+    const diffAttended = attended - currAttended;
+    
+    if (diffConducted < 0 || diffAttended < 0 || diffAttended > diffConducted) {
+        preview.classList.remove("hidden");
+        previewText.innerHTML = `<span class="text-error font-bold">Error:</span> Invalid sync.`;
+        btn.disabled = true;
+        return;
+    }
+    
+    const diffAbsent = diffConducted - diffAttended;
+    
+    preview.classList.remove("hidden");
+    previewText.innerHTML = `Adding <b class="text-on-surface">${diffConducted} new classes</b> (${diffAttended} attended, ${diffAbsent} absent) to history.`;
+    btn.disabled = false;
+}
+
+async function saveSyncAttendance(e) {
+    e.preventDefault();
+    const subjectId = document.getElementById("sync-subject-id").value;
+    const conducted = parseInt(document.getElementById("sync-form-conducted").value);
+    const attended = parseInt(document.getElementById("sync-form-attended").value);
+    
+    const btn = document.getElementById("sync-submit-btn");
+    btn.disabled = true;
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/subjects/${subjectId}/sync`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${localStorage.getItem('token')}`
+            },
+            body: JSON.stringify({ conducted, attended })
+        });
+        
+        if (!response.ok) {
+            const data = await response.json();
+            throw new Error(data.detail || "Failed to sync attendance");
+        }
+        
+        toggleModal("syncModal");
+        showToast("Attendance synced successfully!", "success");
+        await fetchAllData();
+    } catch (error) {
+        showToast(error.message, "error");
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function handleSyncOcrUpload(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    showToast("Processing image with AI...", "info");
+    
+    const formData = new FormData();
+    formData.append("file", file);
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/attendance/ocr`, {
+            method: "POST",
+            headers: { "Authorization": `Bearer ${localStorage.getItem('token')}` },
+            body: formData
+        });
+        
+        if (!response.ok) throw new Error("OCR failed");
+        
+        const data = await response.json();
+        
+        const subjectId = document.getElementById("sync-subject-id").value;
+        const subject = appState.subjects.find(s => s.id == subjectId);
+        
+        let match = null;
+        if (subject && data.length > 0) {
+            match = data.find(item => 
+                item.subject_name.toLowerCase().includes(subject.name.toLowerCase()) || 
+                subject.name.toLowerCase().includes(item.subject_name.toLowerCase())
+            ) || data[0]; 
+        }
+        
+        if (match) {
+            document.getElementById("sync-form-conducted").value = match.conducted;
+            document.getElementById("sync-form-attended").value = match.attended;
+            updateSyncPreview();
+            showToast(`Extracted ${match.conducted} conducted, ${match.attended} attended`, "success");
+        } else {
+            showToast("No matching data found in image.", "warning");
+        }
+        
+    } catch (err) {
+        showToast("Failed to process image", "error");
+    }
+    
+    e.target.value = "";
+}
+
 // ============================================================================
 // 5. CALCULATIONS ENGINE (BUSINESS LOGIC)
 // ============================================================================
@@ -782,6 +1029,11 @@ function getClassWeight(cls) {
 function calculateGlobalAttendance() {
     let presentHours = 0;
     let absentHours = 0;
+    
+    appState.subjects.forEach(sub => {
+        presentHours += (sub.baseline_attended || 0);
+        absentHours += ((sub.baseline_conducted || 0) - (sub.baseline_attended || 0));
+    });
     
     Object.values(appState.attendanceLogs).forEach(dayLogs => {
         dayLogs.forEach(cls => {
@@ -808,9 +1060,10 @@ function calculateSubjectAttendance() {
     // Initialize subjects list
     appState.subjects.forEach(sub => {
         subjectStats[sub.name] = { 
-            present: 0, 
-            absent: 0, 
-            total: 0, 
+            id: sub.id,
+            present: sub.baseline_attended || 0, 
+            absent: (sub.baseline_conducted || 0) - (sub.baseline_attended || 0), 
+            total: sub.baseline_conducted || 0, 
             percent: 0, 
             code: sub.code || "", 
             color: sub.color || "#7c4dff",
@@ -1256,7 +1509,12 @@ function renderDashboardSubjectSummary() {
         row.innerHTML = `
             <div class="flex justify-between items-start">
                 <div class="min-w-0 flex-1">
-                    <h4 class="font-extrabold text-[12px] text-on-surface leading-tight truncate mr-2" title="${safeName}">${safeName}</h4>
+                    <div class="flex items-center gap-1.5">
+                        <h4 class="font-extrabold text-[12px] text-on-surface leading-tight truncate" title="${safeName}">${safeName}</h4>
+                        <button onclick="openSyncModal(${stats.id})" class="text-primary hover:bg-primary/10 rounded p-0.5 transition-colors flex items-center" title="Sync Attendance">
+                            <span class="material-symbols-outlined text-[12px]">sync</span>
+                        </button>
+                    </div>
                     <p class="text-[10px] text-on-surface-variant font-medium mt-0.5">${safeProf}</p>
                 </div>
                 <div class="text-right flex-shrink-0">
@@ -4486,14 +4744,6 @@ async function saveOnboardingWizardData() {
 // ============================================================================
 
 document.addEventListener("DOMContentLoaded", async () => {
-    await initAppState();
-    
-    // Default open dashboard tab
-    tabNavigation("dashboard");
-    
-    // Set active sub-tab defaults
-    toggleScheduleSubTab("timetable");
-    
     // Quick micro-interactions for active button pressing
     document.querySelectorAll("button, select, input, a").forEach(el => {
         el.addEventListener("mousedown", () => el.style.transform = "scale(0.97)");
@@ -4501,10 +4751,20 @@ document.addEventListener("DOMContentLoaded", async () => {
         el.addEventListener("mouseleave", () => el.style.transform = "");
     });
     
-    // First welcome message toast
-    setTimeout(() => {
-        showToast("AttendWise AI Active", `Hi ${appState.profile.name}, target set to ${appState.profile.targetGoal}%. Keep tracking!`, "insights");
-    }, 1500);
+    const isReady = await initAppState();
+    
+    if (isReady) {
+        // Default open dashboard tab
+        tabNavigation("dashboard");
+        
+        // Set active sub-tab defaults
+        toggleScheduleSubTab("timetable");
+        
+        // First welcome message toast
+        setTimeout(() => {
+            showToast("AttendWise AI Active", `Hi ${appState.profile.name}, target set to ${appState.profile.targetGoal}%. Keep tracking!`, "insights");
+        }, 1500);
+    }
 });
 
 // Expose functions to window object for inline HTML event handlers (since app.js is a module)
@@ -4541,6 +4801,10 @@ window.deleteUserAccount = deleteUserAccount;
 // Add missing exposures for dynamic element event handlers
 window.updateRecordStatus = updateRecordStatus;
 window.updateCalendarRecordStatus = updateCalendarRecordStatus;
+window.openSyncModal = openSyncModal;
+window.updateSyncPreview = updateSyncPreview;
+window.saveSyncAttendance = saveSyncAttendance;
+window.handleSyncOcrUpload = handleSyncOcrUpload;
 window.editClassRecord = editClassRecord;
 window.deleteClassRecord = deleteClassRecord;
 window.openAddClassModalForSlot = openAddClassModalForSlot;

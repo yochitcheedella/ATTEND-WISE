@@ -47,6 +47,13 @@ class Subject(Base):
     subject_type = Column(String, default="Theory")  # Theory or Lab
     weekly_classes = Column(Integer, default=4)
     total_planned_classes = Column(Integer, default=40)
+    
+    # Baseline and Current Attendance Tracking
+    baseline_conducted = Column(Integer, default=0)
+    baseline_attended = Column(Integer, default=0)
+    current_conducted = Column(Integer, default=0)
+    current_attended = Column(Integer, default=0)
+    last_synced_at = Column(DateTime(timezone=True), nullable=True)
 
     owner = relationship("User", back_populates="subjects")
     timetables = relationship("Timetable", back_populates="subject")
@@ -85,6 +92,7 @@ class Attendance(Base):
     remarks = Column(String, nullable=True)
     # Link to a specific class session when using calendar-driven flow
     session_id = Column(Integer, ForeignKey("class_sessions.id"), nullable=True)
+    source = Column(String, default="daily_tracker")  # manual, ocr, daily_tracker, sync
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     owner = relationship("User", back_populates="attendances")
