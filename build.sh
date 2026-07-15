@@ -8,7 +8,7 @@ pip install -r backend/requirements.txt
 echo "Installing Node dependencies..."
 npm install
 
-echo "Building Frontend via Vite..."
-npm run build
+echo "Building Frontend via Vite (production mode)..."
+npx vite build --mode production
 
 echo "Build complete!"

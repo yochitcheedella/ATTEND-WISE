@@ -103,20 +103,26 @@ allowed_origins_str = os.getenv("ALLOWED_ORIGINS", "")
 if allowed_origins_str:
     allowed_origins = [origin.strip() for origin in allowed_origins_str.split(",")]
 else:
-    # Default to accepting Vercel, localhost, and Capacitor
+    # All valid origins: Vercel, Capacitor Android (all schemes), local dev, and Render
     allowed_origins = [
         "https://attend-wise.vercel.app",
-        "http://localhost:5173",
+        "https://attend-wise.onrender.com",
+        # Android Capacitor WebView uses these schemes
         "capacitor://localhost",
-        "http://localhost"
+        "https://localhost",
+        "http://localhost",
+        # Local dev ports
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://localhost:8000",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:8000",
     ]
 
-# If we have specific origins, we can allow credentials. If it's literally just ["*"], we can't.
-# Vercel gives random branch preview URLs, so sometimes it's easier to use allow_origin_regex
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_origin_regex=r"https://.*\.vercel\.app", # Matches any vercel preview deployment
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

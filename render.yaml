@@ -4,6 +4,7 @@ services:
     env: python
     buildCommand: ./build.sh
     startCommand: uvicorn backend.main:app --host 0.0.0.0 --port 10000
+    autoDeploy: true
     envVars:
       - key: DATABASE_URL
         fromDatabase:
@@ -13,7 +14,8 @@ services:
         value: 3.10.12
       - key: GEMINI_API_KEY
         sync: false
-    autoDeploy: false
+      - key: SECRET_KEY
+        generateValue: true
 
 databases:
   - name: attendwise-db
