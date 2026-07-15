@@ -107,17 +107,22 @@ else:
     allowed_origins = [
         "https://attend-wise.vercel.app",
         "https://attend-wise.onrender.com",
-        # Android Capacitor WebView uses these schemes
-        "capacitor://localhost",
-        "https://localhost",
-        "http://localhost",
-        # Local dev ports
         "http://localhost:3000",
         "http://localhost:5173",
         "http://localhost:8000",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:8000",
     ]
+
+# Android Capacitor WebView secure and local schemes MUST always be allowed
+critical_android_origins = [
+    "capacitor://localhost",
+    "https://localhost",
+    "http://localhost"
+]
+for origin in critical_android_origins:
+    if origin not in allowed_origins:
+        allowed_origins.append(origin)
 
 app.add_middleware(
     CORSMiddleware,
