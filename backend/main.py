@@ -80,6 +80,7 @@ try:
             ("profile_photo", "TEXT"),
             ("register_number", "TEXT"),
             ("university", "TEXT"),
+            ("fcm_token", "TEXT"),
         ]:
             if not _column_exists(conn, "users", col, _db_url):
                 conn.execute(text(f"ALTER TABLE users ADD COLUMN {col} {coltype}"))
