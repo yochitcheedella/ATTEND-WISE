@@ -205,6 +205,20 @@ frontend_dist = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__f
 if os.path.exists(frontend_dist):
     app.mount("/assets", StaticFiles(directory=os.path.join(frontend_dist, "assets")), name="assets")
 
+# --- Health / Wake-up endpoints ---
+@app.get("/ping", tags=["Health"])
+def ping():
+    """Ultra-fast endpoint to wake up the Render free-tier server."""
+    return {"status": "ok", "message": "pong"}
+
+@app.get("/health", tags=["Health"])
+def health_check(db: Session = Depends(get_db)):
+    try:
+        db.execute(text("SELECT 1"))
+        return {"status": "healthy", "database": "connected"}
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Database unhealthy: {e}")
+
 # --- Authentication Endpoints ---
 @app.post("/auth/register", response_model=schemas.User, tags=["Authentication"])
 def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):

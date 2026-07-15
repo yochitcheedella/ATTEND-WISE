@@ -1,0 +1,102 @@
+{
+  "name": "AttendWise – AI Attendance Companion",
+  "short_name": "AttendWise",
+  "description": "AttendWise is an AI-powered student attendance monitoring companion that helps track, predict, and optimize your academic attendance.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1a1a2e",
+  "theme_color": "#cdbdff",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": [
+    "education",
+    "productivity",
+    "utilities"
+  ],
+  "icons": [
+    {
+      "src": "/icons/icon-48.webp",
+      "type": "image/webp",
+      "sizes": "48x48",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-72.webp",
+      "type": "image/webp",
+      "sizes": "72x72",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-96.webp",
+      "type": "image/webp",
+      "sizes": "96x96",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-128.webp",
+      "type": "image/webp",
+      "sizes": "128x128",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-192.webp",
+      "type": "image/webp",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-256.webp",
+      "type": "image/webp",
+      "sizes": "256x256",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512.webp",
+      "type": "image/webp",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Mark Attendance",
+      "short_name": "Attendance",
+      "description": "Quickly mark today's attendance",
+      "url": "/?action=mark-attendance",
+      "icons": [
+        {
+          "src": "icon-192x192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "View Dashboard",
+      "short_name": "Dashboard",
+      "description": "View your attendance statistics",
+      "url": "/?action=dashboard",
+      "icons": [
+        {
+          "src": "icon-192x192.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/webp",
+      "form_factor": "narrow",
+      "label": "AttendWise Dashboard"
+    }
+  ],
+  "prefer_related_applications": false,
+  "display_override": [
+    "standalone",
+    "minimal-ui"
+  ]
+}

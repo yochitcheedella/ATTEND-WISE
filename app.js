@@ -587,7 +587,9 @@ async function initAppState() {
         } else if (response.status === 401) {
             localStorage.removeItem("access_token");
             showAuthScreen();
-            return;
+            try { await SplashScreen.hide(); } catch(err){}
+            removeSplashScreen();
+            return false;
         } else {
             console.error("Failed to fetch state from backend, attempting offline load");
             const cached = localStorage.getItem('offline_app_state');
