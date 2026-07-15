@@ -236,6 +236,10 @@ function getAuthHeaders() {
 function showAuthScreen() {
     const screen = document.getElementById("auth-screen");
     if (screen) screen.classList.remove("hidden");
+    
+    // Background ping to pre-warm Render free-tier backend (so it wakes up quickly)
+    console.info("[Auth] Pre-warming Render backend...");
+    fetch(`${API_BASE_URL}/ping`).catch(err => console.warn("Warmup ping error:", err));
 }
 
 function hideAuthScreen() {
@@ -277,6 +281,13 @@ async function handleAuthSignIn(e) {
     const email = document.getElementById("signin-email").value.trim();
     const password = document.getElementById("signin-password").value;
     
+    const submitBtn = document.getElementById("signin-submit-btn");
+    const originalText = submitBtn ? submitBtn.textContent : "Access Dashboard";
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Connecting...";
+    }
+    
     const formData = new URLSearchParams();
     formData.append("username", email);
     formData.append("password", password);
@@ -311,7 +322,12 @@ async function handleAuthSignIn(e) {
     } catch (err) {
         authState = "Offline";
         console.error("[Auth] Network error during login:", err);
-        showToast("Network Unavailable", "Could not connect to the authentication server.", "error");
+        showToast("Network Unavailable", "Could not connect to the authentication server. Please wait ~30 seconds for the server to wake up and try again.", "error");
+    } finally {
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = originalText;
+        }
     }
 }
 
@@ -327,9 +343,20 @@ async function handleAuthSignUp(e) {
     const goalVal = document.getElementById("signup-goal").value.trim();
     const semester = document.getElementById("signup-semester").value;
     
+    const submitBtn = document.getElementById("signup-submit-btn");
+    const originalText = submitBtn ? submitBtn.textContent : "Create Account";
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Creating Account...";
+    }
+    
     if (password.length < 6) {
         authState = "Unauthenticated";
         showToast("Weak Password", "Password must be at least 6 characters.", "warning");
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = originalText;
+        }
         return;
     }
     
@@ -399,7 +426,12 @@ async function handleAuthSignUp(e) {
     } catch (err) {
         authState = "Offline";
         console.error("[Auth] Network error during signup:", err);
-        showToast("Network Unavailable", "Could not connect to auth server", "error");
+        showToast("Network Unavailable", "Could not connect to the server. Please wait ~30 seconds for the server to wake up and try again.", "error");
+    } finally {
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = originalText;
+        }
     }
 }
 
@@ -495,6 +527,9 @@ async function initAppState() {
     console.info("[App] initAppState starting. Current authState:", authState);
     let sessionValid = false;
 
+    const statusEl = document.getElementById("splash-status");
+    if (statusEl) statusEl.textContent = "Checking credentials...";
+
     if (!supabase) {
         console.warn("[App] Supabase missing. Falling back to FastAPI token check.");
         const token = localStorage.getItem("access_token");
@@ -550,10 +585,23 @@ async function initAppState() {
     }
     
     try {
+        if (statusEl) statusEl.textContent = "Connecting to server...";
+        
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => {
+            controller.abort();
+            console.warn("[App] /state request timed out. Falling back to offline load.");
+            if (statusEl) statusEl.textContent = "Server slow, loading cached...";
+        }, 7500); // 7.5s timeout for cold start fallback
+
         const response = await fetch(`${API_BASE_URL}/state`, {
-            headers: getAuthHeaders()
+            headers: getAuthHeaders(),
+            signal: controller.signal
         });
+        clearTimeout(timeoutId);
+
         if (response.ok) {
+            if (statusEl) statusEl.textContent = "Restoring data...";
             const data = await response.json();
             appState.profile = data.profile;
             appState.subjects = data.subjects;
@@ -563,9 +611,13 @@ async function initAppState() {
             appState.holidays = data.holidays || [];
             if (appState.activeSemester) {
                 try {
+                    const holController = new AbortController();
+                    const holTimeout = setTimeout(() => holController.abort(), 3000);
                     const holResponse = await fetch(`${API_BASE_URL}/semesters/${appState.activeSemester.id}/holidays`, {
-                        headers: getAuthHeaders()
+                        headers: getAuthHeaders(),
+                        signal: holController.signal
                     });
+                    clearTimeout(holTimeout);
                     if (holResponse.ok) {
                         appState.holidays = await holResponse.json();
                     } else {
@@ -602,7 +654,8 @@ async function initAppState() {
             hideAuthScreen();
         }
     } catch (e) {
-        console.error("Backend not reachable, attempting offline load", e);
+        console.error("Backend not reachable or request timed out, attempting offline load", e);
+        if (statusEl) statusEl.textContent = "Offline fallback...";
         const cached = localStorage.getItem('offline_app_state');
         if (cached) {
             Object.assign(appState, JSON.parse(cached));
@@ -1513,9 +1566,6 @@ function renderDashboardSubjectSummary() {
                 <div class="min-w-0 flex-1">
                     <div class="flex items-center gap-1.5">
                         <h4 class="font-extrabold text-[12px] text-on-surface leading-tight truncate" title="${safeName}">${safeName}</h4>
-                        <button onclick="openSyncModal(${stats.id})" class="text-primary hover:bg-primary/10 rounded p-0.5 transition-colors flex items-center" title="Sync Attendance">
-                            <span class="material-symbols-outlined text-[12px]">sync</span>
-                        </button>
                     </div>
                     <p class="text-[10px] text-on-surface-variant font-medium mt-0.5">${safeProf}</p>
                 </div>
@@ -1526,7 +1576,13 @@ function renderDashboardSubjectSummary() {
             </div>
             <div class="flex justify-between items-center text-[10px] text-on-surface-variant font-semibold pt-1 border-t border-outline-variant/10">
                 <span>Attended: <b class="text-on-surface font-extrabold">${stats.present}/${stats.total}</b></span>
-                <span class="font-extrabold text-on-surface">${actionText}</span>
+                <div class="flex items-center gap-1.5">
+                    <button onclick="openSyncModal(${stats.id})" class="text-primary hover:underline font-bold transition-all text-[9px]">
+                        Post Past Attendance
+                    </button>
+                    <span class="opacity-30">|</span>
+                    <span class="font-extrabold text-on-surface">${actionText}</span>
+                </div>
             </div>
             <div class="h-1.5 w-full bg-surface-container rounded-full overflow-hidden">
                 <div class="h-full ${barColor} rounded-full transition-all duration-700" style="width:${stats.percent}%"></div>
@@ -3574,9 +3630,13 @@ function toggleMobileSidebar() {
 
 async function fetchLeavePlans() {
     try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 4000);
         const response = await fetch(`${API_BASE_URL}/leave_plans`, {
-            headers: getAuthHeaders()
+            headers: getAuthHeaders(),
+            signal: controller.signal
         });
+        clearTimeout(timeoutId);
         if (response.ok) {
             appState.leavePlans = await response.json();
         } else {

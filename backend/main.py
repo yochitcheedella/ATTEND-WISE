@@ -892,8 +892,9 @@ def mark_attendance(req: MarkAttendanceRequest, current_user: models.User = Depe
     
     # Parse start time from HH:MM string
     try:
+        from datetime import time as dt_time
         h, m = map(int, req.start.split(':'))
-        start_time_obj = time(h, m)
+        start_time_obj = dt_time(h, m)
     except Exception:
         start_time_obj = None
     
@@ -1336,6 +1337,13 @@ def _generate_sessions_for_active_semester(db: Session, user_id: int):
     ).delete()
     db.commit()
     
+    # Cache all remaining existing sessions to avoid query-in-loop
+    existing = db.query(models.ClassSession).filter(
+        models.ClassSession.user_id == user_id,
+        models.ClassSession.semester_id == semester.id
+    ).all()
+    existing_keys = {(s.date, s.start_time, s.subject_id) for s in existing}
+    
     holidays = db.query(models.Holiday).filter(
         models.Holiday.user_id == user_id,
         models.Holiday.semester_id == semester.id
@@ -1368,8 +1376,10 @@ def _generate_sessions_for_active_semester(db: Session, user_id: int):
     for entry in entries:
         day_entries[entry.day].append(entry)
         
+    print(f"[DEBUG] day_entries keys: {list(day_entries.keys())}")
     curr = start_gen
     to_add = []
+    print(f"[DEBUG] _generate_sessions_for_active_semester: start={start_gen}, end={end_gen}, entries={len(entries)}")
     while curr <= end_gen:
         day_str = days_map[curr.weekday()]
         status = "holiday" if (curr in holiday_dates and curr not in working_saturdays) else "upcoming"
@@ -1378,15 +1388,12 @@ def _generate_sessions_for_active_semester(db: Session, user_id: int):
             curr += timedelta(days=1)
             continue
             
+        if day_entries[day_str]:
+            print(f"[DEBUG] Found entries for day {day_str} on date {curr}: {len(day_entries[day_str])}")
+            
         for entry in day_entries[day_str]:
-            # Check if there's already a session on this date and time
-            session_exists = db.query(models.ClassSession).filter(
-                models.ClassSession.user_id == user_id,
-                models.ClassSession.subject_id == entry.subject_id,
-                models.ClassSession.date == curr,
-                models.ClassSession.start_time == entry.start_time
-            ).first()
-            if not session_exists:
+            key = (curr, entry.start_time, entry.subject_id)
+            if key not in existing_keys:
                 to_add.append(models.ClassSession(
                     user_id=user_id,
                     semester_id=semester.id,
@@ -1422,6 +1429,13 @@ def _generate_sessions_for_version(db: Session, user_id: int, version: models.Ti
     ).delete()
     db.commit()
     
+    # Cache all remaining existing sessions to avoid query-in-loop
+    existing = db.query(models.ClassSession).filter(
+        models.ClassSession.user_id == user_id,
+        models.ClassSession.semester_id == semester.id
+    ).all()
+    existing_keys = {(s.date, s.start_time, s.subject_id) for s in existing}
+    
     holidays = db.query(models.Holiday).filter(
         models.Holiday.user_id == user_id,
         models.Holiday.semester_id == semester.id
@@ -1444,14 +1458,8 @@ def _generate_sessions_for_version(db: Session, user_id: int, version: models.Ti
         status = "holiday" if curr in holiday_dates else "upcoming"
         
         for entry in day_entries[day_str]:
-            # check if there's already a session on this date and time
-            session_exists = db.query(models.ClassSession).filter(
-                models.ClassSession.user_id == user_id,
-                models.ClassSession.subject_id == entry.subject_id,
-                models.ClassSession.date == curr,
-                models.ClassSession.start_time == entry.start_time
-            ).first()
-            if not session_exists:
+            key = (curr, entry.start_time, entry.subject_id)
+            if key not in existing_keys:
                 to_add.append(models.ClassSession(
                     user_id=user_id,
                     semester_id=semester.id,
@@ -1711,7 +1719,7 @@ def create_extra_class_session(
 # ============================================================================
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL   = "gemini-2.5-flash"
+GEMINI_MODEL   = "gemini-1.5-flash"
 GEMINI_URL     = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
 
 TIMETABLE_OCR_PROMPT = """You are an expert Indian engineering college timetable parser.
@@ -1806,7 +1814,7 @@ async def ocr_timetable(
 
     headers = {"Content-Type": "application/json"}
     
-    models_to_try = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-2.5-flash-lite"]
+    models_to_try = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash", "gemini-2.5-flash"]
     gemini_response = None
     last_error = None
     successful_model = None
@@ -1950,7 +1958,7 @@ async def ocr_attendance(
     }
 
     headers = {"Content-Type": "application/json"}
-    models_to_try = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-2.5-flash-lite"]
+    models_to_try = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash", "gemini-2.5-flash"]
     gemini_response = None
     last_error = None
 
