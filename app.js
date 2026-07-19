@@ -237,6 +237,23 @@ function getAuthHeaders() {
     return token ? { "Authorization": "Bearer " + token } : {};
 }
 
+/**
+ * Lightweight client-side JWT expiry check (no signature verification).
+ * Returns true if the token exists and its exp claim is in the future.
+ * Used as a fast pre-check to avoid a wasted /state round-trip.
+ */
+function isTokenFresh() {
+    const token = localStorage.getItem("access_token");
+    if (!token) return false;
+    try {
+        const payload = JSON.parse(atob(token.split(".")[1]));
+        if (!payload.exp) return true; // no exp = assume valid
+        return Date.now() / 1000 < payload.exp;
+    } catch {
+        return true; // if we can't parse, let the server decide
+    }
+}
+
 function showAuthScreen() {
     const screen = document.getElementById("auth-screen");
     if (screen) screen.classList.remove("hidden");
@@ -267,6 +284,23 @@ function switchAuthTab(tab) {
         signinTab.className = "flex-1 py-2 text-center text-label-md rounded-xl font-bold transition-all text-on-surface-variant hover:text-on-surface";
         signupForm.classList.remove("hidden");
         signinForm.classList.add("hidden");
+    }
+}
+
+/**
+ * Toggles an input field between password (hidden) and text (visible) type.
+ * Updates the eye icon on the button accordingly.
+ */
+function togglePasswordVisibility(inputId, btn) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    const icon = btn.querySelector(".material-symbols-outlined");
+    if (input.type === "password") {
+        input.type = "text";
+        if (icon) icon.textContent = "visibility_off";
+    } else {
+        input.type = "password";
+        if (icon) icon.textContent = "visibility";
     }
 }
 
@@ -605,6 +639,18 @@ async function initAppState() {
         removeSplashScreen();
         return false;
     }
+
+    // Fast client-side expiry pre-check — avoids a round-trip for an obviously expired token
+    if (!isTokenFresh()) {
+        console.info("[Auth] Local token is expired. Clearing and showing auth screen.");
+        localStorage.removeItem("access_token");
+        localStorage.removeItem("offline_app_state");
+        try { await Preferences.remove({ key: "access_token" }); } catch (err) {}
+        showAuthScreen();
+        try { await SplashScreen.hide(); } catch(err){}
+        removeSplashScreen();
+        return false;
+    }
     
     // Check PIN Lock
     const pinEnabled = localStorage.getItem("pin_enabled") === "true";
@@ -667,6 +713,7 @@ async function initAppState() {
             if (window.capacitorPushNotifications) registerPushNotifications();
         } else if (response.status === 401) {
             localStorage.removeItem("access_token");
+            localStorage.removeItem("offline_app_state"); // clear stale cache on auth failure
             try {
                 await Preferences.remove({ key: "access_token" });
             } catch (err) {}
@@ -5531,6 +5578,11 @@ if (supabase) {
                 if (response.ok) {
                     const data = await response.json();
                     localStorage.setItem('access_token', data.access_token);
+                    try {
+                        await Preferences.set({ key: "access_token", value: data.access_token });
+                    } catch (err) {
+                        console.warn("[Auth] Preferences.set failed after Google login", err);
+                    }
                     showToast('Google Login Success', 'Welcome back!', 'check_circle');
                     await initAppState();
                     tabNavigation('dashboard');
@@ -5541,3 +5593,6 @@ if (supabase) {
         }
     });
 }
+
+window.togglePasswordVisibility = togglePasswordVisibility;
+window.quickLoginDemo = quickLoginDemo;

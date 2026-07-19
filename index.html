@@ -459,7 +459,12 @@
                         </div>
                         <div>
                             <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5 ml-1">Password</label>
-                            <input type="password" id="signin-password" class="w-full bg-zinc-900/80 border border-outline-variant/60 rounded-xl text-[13px] text-on-surface px-4 py-3 focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none transition-all focus:bg-zinc-900" placeholder="••••••••" required />
+                            <div class="relative">
+                                <input type="password" id="signin-password" class="w-full bg-zinc-900/80 border border-outline-variant/60 rounded-xl text-[13px] text-on-surface px-4 py-3 pr-10 focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none transition-all focus:bg-zinc-900" placeholder="••••••••" required />
+                                <button type="button" tabindex="-1" onclick="togglePasswordVisibility('signin-password', this)" class="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface transition-colors" aria-label="Toggle password visibility">
+                                    <span class="material-symbols-outlined text-[18px]">visibility</span>
+                                </button>
+                            </div>
                         </div>
                     </div>
                     <button id="signin-submit-btn" type="submit" class="w-full py-3.5 bg-gradient-to-r from-primary to-[#9876ff] text-on-primary rounded-xl font-bold text-[14px] active:scale-95 transition-all hover:shadow-[0_0_20px_rgba(124,77,255,0.4)] mt-4">
@@ -493,7 +498,12 @@
                     </div>
                     <div>
                         <label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5 ml-1">Password</label>
-                        <input type="password" id="signup-password" class="w-full bg-zinc-900/80 border border-outline-variant/60 rounded-xl text-[13px] text-on-surface px-3 py-2.5 focus:border-primary focus:outline-none focus:bg-zinc-900 transition-all" placeholder="Min. 6 characters" required />
+                        <div class="relative">
+                            <input type="password" id="signup-password" class="w-full bg-zinc-900/80 border border-outline-variant/60 rounded-xl text-[13px] text-on-surface px-3 py-2.5 pr-10 focus:border-primary focus:outline-none focus:bg-zinc-900 transition-all" placeholder="Min. 6 characters" required />
+                            <button type="button" tabindex="-1" onclick="togglePasswordVisibility('signup-password', this)" class="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface transition-colors" aria-label="Toggle password visibility">
+                                <span class="material-symbols-outlined text-[18px]">visibility</span>
+                            </button>
+                        </div>
                     </div>
                     <div class="grid grid-cols-2 gap-3">
                         <div class="col-span-2">
@@ -1626,7 +1636,7 @@
                 <p class="text-[12px] text-secondary bg-secondary/10 rounded-xl p-3 border border-secondary/20">Reset token sent! In dev mode, check the server console. Paste the token below.</p>
                 <form onsubmit="handleResetPassword(event)" class="space-y-3">
                     <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Reset Token</label><input aria-label="Password reset token" type="text" id="fp-token" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none" placeholder="Paste token from console" required/></div>
-                    <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">New Password</label><input aria-label="New password" type="password" id="fp-new-password" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 focus:border-primary focus:outline-none" placeholder="Min 8 chars + 1 digit" required/></div>
+                    <div><label class="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">New Password</label><div class="relative"><input aria-label="New password" type="password" id="fp-new-password" class="w-full bg-zinc-900 border border-outline-variant rounded-xl text-sm text-on-surface p-2.5 pr-10 focus:border-primary focus:outline-none" placeholder="Min 8 chars + 1 digit" required/><button type="button" tabindex="-1" onclick="togglePasswordVisibility('fp-new-password', this)" class="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface transition-colors" aria-label="Toggle password visibility"><span class="material-symbols-outlined text-[18px]">visibility</span></button></div></div>
                     <button type="submit" class="w-full py-2.5 bg-primary text-on-primary rounded-xl font-bold text-sm">Reset Password</button>
                 </form>
             </div>

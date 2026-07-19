@@ -2343,10 +2343,10 @@ def google_login(body: dict, db: Session = Depends(get_db)):
         user = models.User(
             name=name,
             email=email,
-            password_hash="",  # Empty password for Google OAuth
-            college="Google University",
-            branch="Computer Science",
-            semester="Semester 1 (Autumn)",
+            password_hash="",  # Empty password for Google OAuth users
+            college=None,
+            branch=None,
+            semester=None,
             attendance_goal=75.0
         )
         try:
