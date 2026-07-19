@@ -1177,24 +1177,33 @@ function getSubjectWeight(sub) {
 function calculateGlobalAttendance() {
     let presentHours = 0;
     let absentHours = 0;
-    
+
+    // Baseline from portal sync
     appState.subjects.forEach(sub => {
         const w = getSubjectWeight(sub);
         presentHours += (sub.baseline_attended || 0) * w;
         absentHours += ((sub.baseline_conducted || 0) - (sub.baseline_attended || 0)) * w;
     });
-    
-    Object.values(appState.attendanceLogs).forEach(dayLogs => {
+
+    // Build the non-instructional date set (exam periods, breaks, holidays)
+    const nonInstructionalSet = new Set(getCombinedHolidayDates());
+    const skipStatuses = new Set(["holiday", "exam", "event", "cancelled"]);
+
+    Object.entries(appState.attendanceLogs).forEach(([dateKey, dayLogs]) => {
+        // Skip entire day if it's non-instructional
+        if (nonInstructionalSet.has(dateKey)) return;
         dayLogs.forEach(cls => {
+            // Skip individual records flagged as non-instructional
+            if (skipStatuses.has(cls.status)) return;
             const weight = getClassWeight(cls);
             if (cls.status === "present") presentHours += weight;
             if (cls.status === "absent") absentHours += weight;
         });
     });
-    
+
     const totalConducted = presentHours + absentHours;
     const percentage = totalConducted > 0 ? Math.round((presentHours / totalConducted) * 100) : 0;
-    
+
     return {
         percentage,
         present: Math.round(presentHours),
@@ -1342,31 +1351,37 @@ function runBunkAnalyzer() {
 // Locally compute attendance streak from appState.attendanceLogs
 // Mirrors the backend _compute_streak logic — counts consecutive class days
 // going backwards where the student had at least one 'present' record.
-// Skips days with no records, or days with only 'cancelled'/'holiday'/'upcoming'.
+// Skips days with no records, or days with only 'cancelled'/'holiday'/'exam'/'event'/'upcoming'.
 function computeLocalStreak() {
     const today = new Date();
     let streak = 0;
-    let checkDate = new Date(today); // start from today
+    let checkDate = new Date(today);
+    const nonInstructionalSet = new Set(getCombinedHolidayDates());
 
     for (let i = 0; i < 365; i++) {
         const dateKey = formatDateKey(checkDate);
-        const records = appState.attendanceLogs[dateKey] || [];
 
-        // Determine if there were any real class records (present or absent)
-        const hasPresent = records.some(r => r.status === "present");
-        const hasMeaningful = records.some(r => r.status === "present" || r.status === "absent");
+        // Skip non-instructional days entirely (exam periods, holidays, breaks)
+        if (nonInstructionalSet.has(dateKey)) {
+            checkDate.setDate(checkDate.getDate() - 1);
+            continue;
+        }
+
+        const records = appState.attendanceLogs[dateKey] || [];
+        const activeRecords = records.filter(r => !["cancelled", "holiday", "exam", "event", "upcoming"].includes(r.status));
+
+        const hasPresent = activeRecords.some(r => r.status === "present");
+        const hasMeaningful = activeRecords.length > 0;
 
         if (!hasMeaningful) {
             // No real class records — skip (weekend, holiday, cancelled-only)
             checkDate.setDate(checkDate.getDate() - 1);
             continue;
         } else if (hasPresent) {
-            // Had at least one present — counts as streak day
             streak++;
             checkDate.setDate(checkDate.getDate() - 1);
         } else {
-            // Had classes but was absent all day — streak broken
-            break;
+            break; // Present on a class day — streak broken
         }
     }
     return streak;
@@ -4221,16 +4236,26 @@ function compileLocalReportData(period, startDate, endDate) {
     
     const dailyLog = {};
     
+    const nonInstructionalDates = new Set(getCombinedHolidayDates());
+    const skipStatuses = new Set(["holiday", "exam", "event", "cancelled"]);
+
     Object.keys(appState.attendanceLogs).forEach(dateKey => {
         if (dateKey >= sStr && dateKey <= eStr) {
+            // Skip entire non-instructional days from report totals
+            const isNonInstructional = nonInstructionalDates.has(dateKey);
             dailyLog[dateKey] = [];
             appState.attendanceLogs[dateKey].forEach(rec => {
-                if (rec.status === "present") present++;
-                if (rec.status === "absent") absent++;
-                if (rec.status === "cancelled") cancelled++;
-                if (rec.status === "holiday") holidays++;
-                
-                if (subjectStats[rec.subject]) {
+                // Holiday/exam/event records: add to dailyLog for display but don't count in totals
+                if (!isNonInstructional && !skipStatuses.has(rec.status)) {
+                    if (rec.status === "present") present++;
+                    if (rec.status === "absent") absent++;
+                } else if (rec.status === "cancelled") {
+                    cancelled++;
+                } else if (["holiday", "exam", "event"].includes(rec.status)) {
+                    holidays++;
+                }
+
+                if (subjectStats[rec.subject] && !isNonInstructional && !skipStatuses.has(rec.status)) {
                     if (rec.status === "present") {
                         subjectStats[rec.subject].present++;
                         subjectStats[rec.subject].total++;
@@ -4239,11 +4264,8 @@ function compileLocalReportData(period, startDate, endDate) {
                         subjectStats[rec.subject].total++;
                     }
                 }
-                
-                dailyLog[dateKey].push({
-                    subject: rec.subject,
-                    status: rec.status
-                });
+
+                dailyLog[dateKey].push({ subject: rec.subject, status: rec.status });
             });
         }
     });

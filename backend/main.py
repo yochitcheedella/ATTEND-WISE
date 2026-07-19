@@ -468,7 +468,8 @@ def _compute_streak(user_id: int, db: Session) -> int:
     Count consecutive class days (going backwards from today) where the 
     user has at least one 'present' record.
     - Days with zero attendance records (weekends, holidays) are skipped.
-    - Days where ALL records are 'cancelled' or 'holiday' are also skipped.
+    - Days where ALL records are 'cancelled', 'holiday', 'exam', or 'event'
+      are skipped (non-instructional days don't break streaks).
     - A day breaks the streak only if it has at least one 'absent' record
       AND zero 'present' records (i.e. the student was completely absent).
     - Today counts toward the streak if already partially marked present.
@@ -476,22 +477,23 @@ def _compute_streak(user_id: int, db: Session) -> int:
     today = date.today()
     streak = 0
     check_date = today  # Start from today itself
-    
+    # Status values that mean the day is non-instructional
+    NON_INSTRUCTIONAL = {"cancelled", "holiday", "exam", "event", "upcoming"}
+
     for _ in range(365):  # Max 1 year lookback
         day_attendances = db.query(models.Attendance).filter(
             models.Attendance.user_id == user_id,
             models.Attendance.date == check_date
         ).all()
-        
-        has_present = any(a.status.lower() in ("present", "late_entry", "od", "event_leave", "medical_leave") for a in day_attendances)
-        has_absent = any(a.status.lower() == "absent" for a in day_attendances)
-        
-        # Check if it's a meaningful class day: has at least one present/absent record
-        active_statuses = {a.status.lower() for a in day_attendances}
-        is_class_day = bool(active_statuses - {"cancelled", "holiday", "upcoming"})
-        
-        if len(day_attendances) == 0 or not is_class_day:
-            # Skip days with no records or only cancelled/holiday/upcoming
+
+        # Only count records that are meaningful (not holiday/exam/cancelled)
+        active = [a for a in day_attendances if a.status.lower() not in NON_INSTRUCTIONAL]
+
+        has_present = any(a.status.lower() in ("present", "late_entry", "od", "event_leave", "medical_leave") for a in active)
+        has_absent = any(a.status.lower() == "absent" for a in active)
+
+        if not active:
+            # Skip: no real class records today (holiday, cancelled-only, weekend)
             check_date -= timedelta(days=1)
             continue
         elif has_present:
@@ -501,7 +503,7 @@ def _compute_streak(user_id: int, db: Session) -> int:
         else:
             # Student was absent on a class day — streak broken
             break
-    
+
     return streak
 
 
@@ -1042,9 +1044,9 @@ def mark_attendance(req: MarkAttendanceRequest, current_user: models.User = Depe
     subject = db.query(models.Subject).filter(models.Subject.name == req.subject_name, models.Subject.user_id == user_id).first()
     if not subject:
         raise HTTPException(status_code=404, detail="Subject not found")
-        
+
     date_obj = date.fromisoformat(req.date)
-    
+
     # Parse start time from HH:MM string
     try:
         from datetime import time as dt_time
@@ -1052,26 +1054,37 @@ def mark_attendance(req: MarkAttendanceRequest, current_user: models.User = Depe
         start_time_obj = dt_time(h, m)
     except Exception:
         start_time_obj = None
-    
-    # Find existing record for this subject on this day for the specific session
-    att = db.query(models.Attendance).filter(
-        models.Attendance.user_id == user_id, 
-        models.Attendance.subject_id == subject.id,
-        models.Attendance.date == date_obj,
-        models.Attendance.start_time == start_time_obj
-    ).first()
-    
-    # Sync with ClassSession if it exists
+
+    # Find the linked ClassSession, if any
     session = db.query(models.ClassSession).filter(
         models.ClassSession.user_id == user_id,
         models.ClassSession.subject_id == subject.id,
         models.ClassSession.date == date_obj,
         models.ClassSession.start_time == start_time_obj
     ).first()
-    
+
+    # Guard: do not allow marking present/absent on exam/holiday/event sessions.
+    # This prevents accidental attendance records on non-instructional days.
+    NON_INSTRUCTIONAL_STATUSES = {"holiday", "exam", "event"}
+    if session and session.status in NON_INSTRUCTIONAL_STATUSES:
+        if req.status in ("present", "absent"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot mark '{req.status}' on a non-instructional session (status: {session.status}). Attendance is not counted on this day."
+            )
+
+    # Find existing attendance record for this subject/day/time
+    att = db.query(models.Attendance).filter(
+        models.Attendance.user_id == user_id,
+        models.Attendance.subject_id == subject.id,
+        models.Attendance.date == date_obj,
+        models.Attendance.start_time == start_time_obj
+    ).first()
+
+    # Sync ClassSession status with the new attendance status
     if session:
         session.status = req.status
-        
+
     if att:
         att.status = req.status
         if session:
