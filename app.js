@@ -1205,26 +1205,36 @@ function calculateGlobalAttendance() {
 
 function calculateSubjectAttendance() {
     const subjectStats = {};
-    
+
+    // Build the non-instructional date set once (includes exam periods, breaks, events)
+    const nonInstructionalSet = new Set(getCombinedHolidayDates());
+
     // Initialize subjects list
     appState.subjects.forEach(sub => {
         const w = getSubjectWeight(sub);
-        subjectStats[sub.name] = { 
+        subjectStats[sub.name] = {
             id: sub.id,
-            present: (sub.baseline_attended || 0) * w, 
-            absent: ((sub.baseline_conducted || 0) - (sub.baseline_attended || 0)) * w, 
-            total: (sub.baseline_conducted || 0) * w, 
-            percent: 0, 
-            code: sub.code || "", 
+            present: (sub.baseline_attended || 0) * w,
+            absent: ((sub.baseline_conducted || 0) - (sub.baseline_attended || 0)) * w,
+            total: (sub.baseline_conducted || 0) * w,
+            percent: 0,
+            code: sub.code || "",
             color: sub.color || "#7c4dff",
             prof: sub.prof || "No Faculty",
             min_req: sub.minimum_required_attendance || 75
         };
     });
-    
-    // Add logs (duration-weighted: labs count by hours)
-    Object.values(appState.attendanceLogs).forEach(dayLogs => {
+
+    // Add logs — skip non-instructional days entirely (exam periods, breaks, holidays)
+    Object.entries(appState.attendanceLogs).forEach(([dateKey, dayLogs]) => {
+        // Skip the entire day if it's a non-instructional date
+        if (nonInstructionalSet.has(dateKey)) return;
+
         dayLogs.forEach(cls => {
+            // Also skip individual records that are flagged as holiday/exam/event/cancelled
+            const skipStatus = ["holiday", "exam", "event", "cancelled"];
+            if (skipStatus.includes(cls.status)) return;
+
             if (subjectStats[cls.subject]) {
                 const weight = getClassWeight(cls);
                 if (cls.status === "present") {
@@ -1237,7 +1247,7 @@ function calculateSubjectAttendance() {
             }
         });
     });
-    
+
     // Calculate individual percentages (round totals for display)
     Object.keys(subjectStats).forEach(name => {
         const stats = subjectStats[name];
@@ -1246,7 +1256,7 @@ function calculateSubjectAttendance() {
         stats.absent = Math.round(stats.absent);
         stats.total = Math.round(stats.total);
     });
-    
+
     return subjectStats;
 }
 
@@ -2189,7 +2199,8 @@ function renderDailyScheduleList() {
         // Dynamic card styles
         let borderAccent = "bg-primary";
         let statusBadge = `<span class="px-2.5 py-0.5 bg-surface-container-highest text-on-surface-variant rounded-full text-[10px] uppercase font-bold tracking-wider">Upcoming</span>`;
-        
+        const isNonInstructional = ["holiday", "exam", "event"].includes(rec.status);
+
         if (rec.status === "present") {
             borderAccent = "bg-secondary shadow-[0_0_8px_rgba(64,229,108,0.4)]";
             statusBadge = `<span class="px-2.5 py-0.5 bg-secondary/15 text-secondary rounded-full text-[10px] uppercase font-bold tracking-wider border border-secondary/20">Present</span>`;
@@ -2202,6 +2213,12 @@ function renderDailyScheduleList() {
         } else if (rec.status === "holiday") {
             borderAccent = "bg-outline-variant";
             statusBadge = `<span class="px-2.5 py-0.5 bg-outline-variant/15 text-on-surface-variant rounded-full text-[10px] uppercase font-bold tracking-wider border border-outline-variant/20">Holiday</span>`;
+        } else if (rec.status === "exam") {
+            borderAccent = "bg-amber-400/70";
+            statusBadge = `<span class="px-2.5 py-0.5 bg-amber-400/15 text-amber-400 rounded-full text-[10px] uppercase font-bold tracking-wider border border-amber-400/20">📝 Exam Day</span>`;
+        } else if (rec.status === "event") {
+            borderAccent = "bg-blue-400/70";
+            statusBadge = `<span class="px-2.5 py-0.5 bg-blue-400/15 text-blue-400 rounded-full text-[10px] uppercase font-bold tracking-wider border border-blue-400/20">🎉 College Event</span>`;
         }
         
         card.className = "relative bg-surface-container-low border border-outline-variant rounded-2xl overflow-hidden p-4 transition-all duration-300 transform translate-y-2 opacity-0 animate-fade-in-up";
@@ -2223,26 +2240,33 @@ function renderDailyScheduleList() {
                     ${statusBadge}
                 </div>
             </div>
-            
-            <!-- Quick status logger buttons -->
-            <div class="grid grid-cols-4 gap-1.5 mt-3 pt-2 border-t border-outline-variant/30">
-                <button class="${rec.status === 'present' ? 'bg-secondary text-zinc-950 font-bold shadow-[0_0_10px_rgba(64,229,108,0.4)]' : 'border border-outline-variant text-on-surface-variant hover:bg-surface-container-high'} flex flex-col items-center justify-center gap-1 p-2 rounded-xl text-[9px] active:scale-95 transition-all" onclick="updateRecordStatus('${dateKey}', '${rec.subject}', '${rec.start}', 'present')">
-                    <span class="material-symbols-outlined text-[16px]">${rec.status === 'present' ? 'check_circle' : 'radio_button_unchecked'}</span>
-                    <span>PRESENT</span>
-                </button>
-                <button class="${rec.status === 'absent' ? 'bg-error text-zinc-950 font-bold shadow-[0_0_10px_rgba(255,82,82,0.4)]' : 'border border-outline-variant text-on-surface-variant hover:bg-surface-container-high'} flex flex-col items-center justify-center gap-1 p-2 rounded-xl text-[9px] active:scale-95 transition-all" onclick="updateRecordStatus('${dateKey}', '${rec.subject}', '${rec.start}', 'absent')">
-                    <span class="material-symbols-outlined text-[16px]">${rec.status === 'absent' ? 'cancel' : 'radio_button_unchecked'}</span>
-                    <span>ABSENT</span>
-                </button>
-                <button class="${rec.status === 'cancelled' ? 'bg-tertiary text-zinc-950 font-bold shadow-[0_0_10px_rgba(255,179,174,0.4)]' : 'border border-outline-variant text-on-surface-variant hover:bg-surface-container-high'} flex flex-col items-center justify-center gap-1 p-2 rounded-xl text-[9px] active:scale-95 transition-all" onclick="updateRecordStatus('${dateKey}', '${rec.subject}', '${rec.start}', 'cancelled')">
-                    <span class="material-symbols-outlined text-[16px]">event_busy</span>
-                    <span>CANCEL</span>
-                </button>
-                <button class="${rec.status === 'holiday' ? 'bg-on-surface-variant text-zinc-950 font-bold' : 'border border-outline-variant text-on-surface-variant hover:bg-surface-container-high'} flex flex-col items-center justify-center gap-1 p-2 rounded-xl text-[9px] active:scale-95 transition-all" onclick="updateRecordStatus('${dateKey}', '${rec.subject}', '${rec.start}', 'holiday')">
-                    <span class="material-symbols-outlined text-[16px]">festival</span>
-                    <span>HOLIDAY</span>
-                </button>
-            </div>
+
+            ${ isNonInstructional
+                ? `<!-- Non-instructional day: no attendance buttons -->
+                   <div class="flex items-center gap-2 mt-3 pt-2 border-t border-outline-variant/30 text-on-surface-variant text-[11px]">
+                       <span class="material-symbols-outlined text-[14px]">info</span>
+                       <span>Attendance not counted on this day.</span>
+                   </div>`
+                : `<!-- Quick status logger buttons -->
+                   <div class="grid grid-cols-4 gap-1.5 mt-3 pt-2 border-t border-outline-variant/30">
+                       <button class="${rec.status === 'present' ? 'bg-secondary text-zinc-950 font-bold shadow-[0_0_10px_rgba(64,229,108,0.4)]' : 'border border-outline-variant text-on-surface-variant hover:bg-surface-container-high'} flex flex-col items-center justify-center gap-1 p-2 rounded-xl text-[9px] active:scale-95 transition-all" onclick="updateRecordStatus('${dateKey}', '${rec.subject}', '${rec.start}', 'present')">
+                           <span class="material-symbols-outlined text-[16px]">${rec.status === 'present' ? 'check_circle' : 'radio_button_unchecked'}</span>
+                           <span>PRESENT</span>
+                       </button>
+                       <button class="${rec.status === 'absent' ? 'bg-error text-zinc-950 font-bold shadow-[0_0_10px_rgba(255,82,82,0.4)]' : 'border border-outline-variant text-on-surface-variant hover:bg-surface-container-high'} flex flex-col items-center justify-center gap-1 p-2 rounded-xl text-[9px] active:scale-95 transition-all" onclick="updateRecordStatus('${dateKey}', '${rec.subject}', '${rec.start}', 'absent')">
+                           <span class="material-symbols-outlined text-[16px]">${rec.status === 'absent' ? 'cancel' : 'radio_button_unchecked'}</span>
+                           <span>ABSENT</span>
+                       </button>
+                       <button class="${rec.status === 'cancelled' ? 'bg-tertiary text-zinc-950 font-bold shadow-[0_0_10px_rgba(255,179,174,0.4)]' : 'border border-outline-variant text-on-surface-variant hover:bg-surface-container-high'} flex flex-col items-center justify-center gap-1 p-2 rounded-xl text-[9px] active:scale-95 transition-all" onclick="updateRecordStatus('${dateKey}', '${rec.subject}', '${rec.start}', 'cancelled')">
+                           <span class="material-symbols-outlined text-[16px]">event_busy</span>
+                           <span>CANCEL</span>
+                       </button>
+                       <button class="${rec.status === 'holiday' ? 'bg-on-surface-variant text-zinc-950 font-bold' : 'border border-outline-variant text-on-surface-variant hover:bg-surface-container-high'} flex flex-col items-center justify-center gap-1 p-2 rounded-xl text-[9px] active:scale-95 transition-all" onclick="updateRecordStatus('${dateKey}', '${rec.subject}', '${rec.start}', 'holiday')">
+                           <span class="material-symbols-outlined text-[16px]">festival</span>
+                           <span>HOLIDAY</span>
+                       </button>
+                   </div>`
+            }
         `;
         
         listBox.appendChild(card);
@@ -5057,8 +5081,8 @@ window.onClassPeriodSelectChange = onClassPeriodSelectChange;
 
 function getCombinedHolidayDates() {
     const dates = [];
-    
-    // 1. Add academic holidays (fetched from backend)
+
+    // 1. Add academic holidays from backend (Holiday table entries)
     if (appState.holidays && Array.isArray(appState.holidays)) {
         appState.holidays.forEach(h => {
             if (typeof h.date === "string") {
@@ -5068,7 +5092,7 @@ function getCombinedHolidayDates() {
             }
         });
     }
-    
+
     // 2. Add leave plan dates (expanded from start_date to end_date)
     if (appState.leavePlans && Array.isArray(appState.leavePlans)) {
         appState.leavePlans.forEach(plan => {
@@ -5083,7 +5107,46 @@ function getCombinedHolidayDates() {
             }
         });
     }
-    
+
+    // 3. Expand non-instructional ranges from the stored academic calendar.
+    //    This covers exam periods, semester breaks, study holidays, and events
+    //    even if the Holiday table rows have not yet been inserted for a user
+    //    who completed onboarding before this logic was added.
+    if (appState.activeSemester && appState.activeSemester.academic_calendar) {
+        try {
+            const cal = typeof appState.activeSemester.academic_calendar === "string"
+                ? JSON.parse(appState.activeSemester.academic_calendar)
+                : appState.activeSemester.academic_calendar;
+
+            // Helper: expand a {start, end} range into individual YYYY-MM-DD strings
+            function expandRange(arr) {
+                (arr || []).forEach(item => {
+                    if (!item.start || !item.end) return;
+                    let cur = new Date(item.start + "T00:00:00");
+                    const end = new Date(item.end + "T00:00:00");
+                    while (cur <= end) {
+                        dates.push(formatDateKey(cur));
+                        cur.setDate(cur.getDate() + 1);
+                    }
+                });
+            }
+
+            expandRange(cal.midExams);
+            expandRange(cal.internalAssessments);
+            expandRange(cal.labExams);
+            expandRange(cal.practicalExams);
+            expandRange(cal.semesterBreak);
+            expandRange(cal.examDates);
+            expandRange(cal.studyHolidays);
+
+            // Non-instructional single days
+            (cal.nonInstructionalDays || []).forEach(d => { if (d.date) dates.push(d.date); });
+
+            // Events explicitly marked as no-classes
+            (cal.events || []).forEach(ev => { if (ev.hasClasses === false && ev.date) dates.push(ev.date); });
+        } catch (e) {}
+    }
+
     return dates;
 }
 
@@ -5168,37 +5231,49 @@ function calculateSubjectExpectedClasses(subjectName, startDate, endDate, holida
     let expected = 0;
     const subjectSlots = timetable.filter(t => t.subject === subjectName);
     const daysMap = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    
+
     const start = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
     const end = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
-    
-    const holidaySet = new Set((holidays || []).map(h => {
-        if (typeof h === "string") return h;
-        if (h.date) return h.date;
-        if (h.toISOString) return h.toISOString().split("T")[0];
-        return "";
-    }).filter(Boolean));
-    
+
+    // Build unified exclusion set: holidays + all non-instructional ranges from academic calendar
+    const combinedHolidays = getCombinedHolidayDates();
+    const holidaySet = new Set([
+        ...(holidays || []).map(h => {
+            if (typeof h === "string") return h;
+            if (h.date) return h.date;
+            if (h.toISOString) return h.toISOString().split("T")[0];
+            return "";
+        }).filter(Boolean),
+        ...combinedHolidays
+    ]);
+
     const workSats = new Set();
     if (appState.activeSemester && appState.activeSemester.academic_calendar) {
         try {
-            const cal = typeof appState.activeSemester.academic_calendar === "string" 
-                ? JSON.parse(appState.activeSemester.academic_calendar) 
+            const cal = typeof appState.activeSemester.academic_calendar === "string"
+                ? JSON.parse(appState.activeSemester.academic_calendar)
                 : appState.activeSemester.academic_calendar;
             if (cal && cal.workingSaturdays) {
                 cal.workingSaturdays.forEach(d => workSats.add(d));
             }
         } catch (e) {}
     }
-    
+
     subjectSlots.forEach(slot => {
         let curr = new Date(start);
         while (curr <= end) {
             const dayStr = daysMap[curr.getDay()];
             const dateStr = formatDateKey(curr);
-            
-            const isMatch = (dayStr === slot.day && !holidaySet.has(dateStr));
-            if (isMatch) {
+
+            // Skip Sundays unless it's a working Saturday override (safety guard)
+            if (dayStr === "Sun") { curr.setDate(curr.getDate() + 1); continue; }
+
+            // Saturday: only count if it's a designated working Saturday
+            if (dayStr === "Sat" && !workSats.has(dateStr)) { curr.setDate(curr.getDate() + 1); continue; }
+
+            // Skip non-instructional days (holidays, exams, breaks, events)
+            const isExcluded = holidaySet.has(dateStr) && !workSats.has(dateStr);
+            if (dayStr === slot.day && !isExcluded) {
                 expected++;
             }
             curr.setDate(curr.getDate() + 1);

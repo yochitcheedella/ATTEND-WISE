@@ -518,25 +518,52 @@ def _get_attendance_weight(att: models.Attendance, subject_map: dict = None) -> 
     return 1
 
 def _compute_global_stats(user_id: int, db: Session):
-    """Compute overall attendance stats across all subjects."""
+    """Compute overall attendance stats across all subjects.
+    
+    Only counts attendance records on genuine instructional days.
+    Records linked to sessions with status 'holiday', 'exam', or 'event' are excluded
+    from the denominator (they should never have been markable, but we guard here too).
+    """
     attendances = db.query(models.Attendance).filter(
         models.Attendance.user_id == user_id
     ).all()
     subjects = db.query(models.Subject).filter(models.Subject.user_id == user_id).all()
     sub_map = {s.id: s for s in subjects}
-    
-    present = sum(_get_attendance_weight(a, sub_map) for a in attendances if a.status.lower() in ("present", "late_entry", "od", "event_leave", "medical_leave"))
-    absent = sum(_get_attendance_weight(a, sub_map) for a in attendances if a.status.lower() == "absent")
-    
-    # Include baselines (imported attendance), weighted by subject type
+
+    # Build a set of session_ids that are non-instructional (holiday/exam/event)
+    # so we can exclude their attendance records from the stats.
+    excluded_session_ids = set()
+    non_instructional_statuses = {"holiday", "exam", "event", "cancelled"}
+    excluded_sessions = db.query(models.ClassSession.id).filter(
+        models.ClassSession.user_id == user_id,
+        models.ClassSession.status.in_(non_instructional_statuses)
+    ).all()
+    excluded_session_ids = {row[0] for row in excluded_sessions}
+
+    # Filter: skip records that are linked to a non-instructional session
+    instructional_attendances = [
+        a for a in attendances
+        if a.session_id is None or a.session_id not in excluded_session_ids
+    ]
+
+    present = sum(
+        _get_attendance_weight(a, sub_map) for a in instructional_attendances
+        if a.status.lower() in ("present", "late_entry", "od", "event_leave", "medical_leave")
+    )
+    absent = sum(
+        _get_attendance_weight(a, sub_map) for a in instructional_attendances
+        if a.status.lower() == "absent"
+    )
+
+    # Include baselines (imported attendance from portal sync), weighted by subject type
     for sub in subjects:
         w = _get_subject_weight(sub)
         present += (sub.baseline_attended or 0) * w
         absent += max(0, (sub.baseline_conducted or 0) - (sub.baseline_attended or 0)) * w
-        
+
     total = present + absent
     percentage = round((present / total * 100), 2) if total > 0 else 0.0
-    
+
     return {"present": present, "absent": absent, "total": total, "percentage": percentage}
 
 def _compute_safe_bunks(present: int, total: int, target_pct: float) -> dict:
@@ -1261,42 +1288,74 @@ def create_semester(
         try:
             cal = json.loads(sem.academic_calendar)
 
-            # Collect all (date, name, type) tuples to insert
+            # Collect all (date, name, type) tuples to insert.
+            # NON_INSTRUCTIONAL_TYPES: attendance is NOT counted on these dates.
+            # Each type maps to a canonical string stored in Holiday.type.
             rows = []
 
             def _collect(hdate, hname, htype):
+                """Add a (date, name, type) tuple; silently skip if date is invalid."""
                 if hdate:
                     rows.append((str(hdate), hname, htype))
 
+            # Individual public/festival/college holidays
             for h in cal.get("holidays", []):
                 try:
-                    _collect(date.fromisoformat(h["date"]), h.get("name", "Holiday"), "Holiday")
+                    htype = h.get("type", "Holiday")
+                    if htype not in ("Public", "Festival", "College", "Holiday"):
+                        htype = "Holiday"
+                    _collect(date.fromisoformat(h["date"]), h.get("name", "Holiday"), htype)
                 except Exception:
                     pass
 
+            # Mid-semester examinations (Mid-I, Mid-II, Internal Exam)
             for m in cal.get("midExams", []):
                 for d in _expand_date_range(m.get("start", ""), m.get("end", "")):
-                    _collect(d, m.get("title", "Mid Exams"), "Mid Exam")
+                    _collect(d, m.get("title", "Mid Exam"), "Exam")
 
+            # Internal assessments (IA-1, IA-2, Unit Test, CIE)
+            for ia in cal.get("internalAssessments", []):
+                for d in _expand_date_range(ia.get("start", ""), ia.get("end", "")):
+                    _collect(d, ia.get("title", "Internal Assessment"), "Exam")
+
+            # Lab examinations
             for l in cal.get("labExams", []):
                 for d in _expand_date_range(l.get("start", ""), l.get("end", "")):
-                    _collect(d, l.get("title", "Lab Exams"), "Lab Exam")
+                    _collect(d, l.get("title", "Lab Exam"), "Exam")
 
+            # Practical examinations
+            for p in cal.get("practicalExams", []):
+                for d in _expand_date_range(p.get("start", ""), p.get("end", "")):
+                    _collect(d, p.get("title", "Practical Exam"), "Exam")
+
+            # Semester breaks (festival blocks, winter/summer vacation)
             for b in cal.get("semesterBreak", []):
                 for d in _expand_date_range(b.get("start", ""), b.get("end", "")):
-                    _collect(d, b.get("title", "Semester Break"), "Semester Break")
+                    _collect(d, b.get("title", "Semester Break"), "Break")
 
+            # End-semester / theory examinations
             for e in cal.get("examDates", []):
                 for d in _expand_date_range(e.get("start", ""), e.get("end", "")):
-                    _collect(d, e.get("title", "Semester Exams"), "Semester Exam")
+                    _collect(d, e.get("title", "End Exam"), "Exam")
 
+            # Study holidays / preparation leave before end exams
             for s in cal.get("studyHolidays", []):
                 for d in _expand_date_range(s.get("start", ""), s.get("end", "")):
-                    _collect(d, s.get("title", "Preparation Leave"), "Study Holiday")
+                    _collect(d, s.get("title", "Preparation Leave"), "Study")
 
+            # Non-instructional single days (orientation, convocation)
+            for ni in cal.get("nonInstructionalDays", []):
+                try:
+                    _collect(date.fromisoformat(ni["date"]), ni.get("title", "Non-Instructional"), "Event")
+                except Exception:
+                    pass
+
+            # College events without classes
             for ev in cal.get("events", []):
                 try:
-                    _collect(date.fromisoformat(ev["date"]), ev.get("title", "College Event"), "Event")
+                    # Only add as holiday if hasClasses is explicitly False
+                    if not ev.get("hasClasses", True):
+                        _collect(date.fromisoformat(ev["date"]), ev.get("title", "College Event"), "Event")
                 except Exception:
                     pass
 
@@ -1405,6 +1464,72 @@ def delete_semester(
     db.delete(sem)
     db.commit()
     return {"message": "Semester and all associated data deleted successfully"}
+
+@app.post("/semesters/{semester_id}/recalculate", tags=["Semesters"])
+def recalculate_semester(
+    semester_id: int,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Retroactively re-classify all ClassSession rows for a semester based on the
+    stored academic_calendar. Useful when a user already completed onboarding before
+    the exam-exclusion logic was added, or after updating the academic calendar.
+
+    - Sessions on Exam/Study/Break/Event dates are updated to status='exam'/'event'/'holiday'
+    - Sessions on instructional dates that were incorrectly marked get reset to 'upcoming'
+      ONLY if they are currently 'holiday'/'exam'/'event' (never touches present/absent records)
+    """
+    user_id = current_user.id
+    sem = db.query(models.Semester).filter(
+        models.Semester.id == semester_id,
+        models.Semester.user_id == user_id
+    ).first()
+    if not sem:
+        raise HTTPException(status_code=404, detail="Semester not found")
+
+    # Load holidays for this semester and build date→type map
+    holidays = db.query(models.Holiday).filter(
+        models.Holiday.user_id == user_id,
+        models.Holiday.semester_id == semester_id
+    ).all()
+    holiday_type_map = {h.date: h.type for h in holidays}
+
+    # Parse working Saturdays from calendar
+    working_saturdays = set()
+    if sem.academic_calendar:
+        try:
+            cal = json.loads(sem.academic_calendar)
+            working_saturdays = {date.fromisoformat(d) for d in cal.get("workingSaturdays", [])}
+        except Exception:
+            pass
+
+    # Load all upcoming/holiday/exam/event sessions for this semester
+    sessions = db.query(models.ClassSession).filter(
+        models.ClassSession.user_id == user_id,
+        models.ClassSession.semester_id == semester_id,
+        models.ClassSession.status.in_(["upcoming", "holiday", "exam", "event"])
+    ).all()
+
+    updated = 0
+    for s in sessions:
+        if s.date in holiday_type_map and s.date not in working_saturdays:
+            htype = holiday_type_map[s.date]
+            if htype in ("Exam", "Break", "Study"):
+                new_status = "exam"
+            elif htype == "Event":
+                new_status = "event"
+            else:
+                new_status = "holiday"
+        else:
+            new_status = "upcoming"
+
+        if s.status != new_status:
+            s.status = new_status
+            updated += 1
+
+    db.commit()
+    return {"message": f"Recalculated {len(sessions)} sessions, updated {updated} classifications."}
 
 @app.post("/semesters/{semester_id}/holidays", response_model=schemas.HolidayOut, tags=["Holidays"])
 def create_holiday(
@@ -1526,8 +1651,13 @@ def _generate_sessions_for_active_semester(db: Session, user_id: int):
         models.Holiday.user_id == user_id,
         models.Holiday.semester_id == semester.id
     ).all()
-    holiday_dates = {h.date for h in holidays}
+    # Build date → type map so we can assign the correct session status per holiday type
+    holiday_type_map = {h.date: h.type for h in holidays}
+    holiday_dates = set(holiday_type_map.keys())
     
+    # Types that mean attendance is NOT counted (Exam, Break, Study, Event, and all holiday variants)
+    NON_INSTRUCTIONAL = {"Exam", "Break", "Study", "Event", "Holiday", "Public", "Festival", "College"}
+
     # Parse working Saturdays to override holiday check
     working_saturdays = set()
     if semester.academic_calendar:
@@ -1558,12 +1688,27 @@ def _generate_sessions_for_active_semester(db: Session, user_id: int):
     to_add = []
     while curr <= end_gen:
         day_str = days_map[curr.weekday()]
-        status = "holiday" if (curr in holiday_dates and curr not in working_saturdays) else "upcoming"
-        
+
+        # Determine the session status for every class on this date:
+        # - "exam"    → date is an exam, break, study holiday, or event (attendance not counted)
+        # - "holiday" → date is a public/festival/college single-day holiday (attendance not counted)
+        # - "upcoming" → regular instructional day
+        # Working Saturdays override the holiday check.
+        if curr in holiday_dates and curr not in working_saturdays:
+            htype = holiday_type_map.get(curr, "Holiday")
+            if htype in ("Exam", "Break", "Study"):
+                status = "exam"
+            elif htype == "Event":
+                status = "event"
+            else:
+                status = "holiday"   # Public, Festival, College, Holiday
+        else:
+            status = "upcoming"
+
         if day_str == "Sun":
             curr += timedelta(days=1)
             continue
-            
+
         for entry in day_entries[day_str]:
             key = (curr, entry.start_time, entry.subject_id)
             if key not in existing_keys:
@@ -1580,7 +1725,7 @@ def _generate_sessions_for_active_semester(db: Session, user_id: int):
                     is_extra=False
                 ))
         curr += timedelta(days=1)
-        
+
     if to_add:
         db.add_all(to_add)
         db.commit()
@@ -2200,23 +2345,46 @@ async def ocr_attendance(
         raise HTTPException(status_code=500, detail=f"Failed to parse Gemini response: {str(e)}")
 
 
+# Canonical type labels used throughout the system for non-instructional day classification.
+# These are stored in the Holiday.type column and used by the attendance engine.
+# INSTRUCTIONAL types (attendance counted): none — only Holiday table entries skip attendance.
+# NON-INSTRUCTIONAL types (attendance NOT counted):
+#   Exam       — Mid exams, lab exams, internal assessments, end exams
+#   Break      — Semester breaks, festival holiday blocks, vacation
+#   Study      — Study holidays / preparation leave before end exams
+#   Holiday    — Individual public/national holidays (Independence Day etc.)
+#   Festival   — Festival single-day holidays (Diwali, Pongal etc.)
+#   Event      — College events declared as non-instructional (Sports Day etc.)
+#   Personal   — User-added personal leave (not from calendar)
+
 CALENDAR_OCR_PROMPT = """You are an expert Indian academic calendar parser for engineering colleges.
 Analyze the provided academic calendar image or PDF and extract ALL key dates and events.
 
-IMPORTANT: Always convert dates to YYYY-MM-DD format regardless of how they appear in the image (e.g. 29-06-2026 → 2026-06-29).
+IMPORTANT:
+- Convert all dates to YYYY-MM-DD format regardless of how they appear (e.g. 29-06-2026 → 2026-06-29).
+- Extract EVERY non-instructional period. Exam days, study holidays, semester breaks, and college events
+  all reduce the teaching denominator and must be captured accurately.
+- Recognize all common label variants (Mid-I, MID-I, IA-1, Internal Assessment, Unit Test, Theory Exam,
+  Practical Examination, Preparation Leave, Study Holiday, Dasara, Dussehra, Puja Holidays, etc.)
 
 Return ONLY a valid JSON object (no markdown, no explanations) with this exact structure:
 {
   "semesterStart": "YYYY-MM-DD",
   "semesterEnd": "YYYY-MM-DD",
   "holidays": [
-    {"date": "YYYY-MM-DD", "name": "Name of holiday"}
+    {"date": "YYYY-MM-DD", "name": "Name of holiday", "type": "Public|Festival|College"}
   ],
   "midExams": [
     {"title": "I Mid Examinations", "start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
   ],
+  "internalAssessments": [
+    {"title": "IA-1", "start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
+  ],
   "labExams": [
     {"title": "Lab Exams", "start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
+  ],
+  "practicalExams": [
+    {"title": "Practical Examinations", "start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
   ],
   "semesterBreak": [
     {"title": "Dasara Holidays", "start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
@@ -2225,25 +2393,34 @@ Return ONLY a valid JSON object (no markdown, no explanations) with this exact s
     {"title": "End Examinations", "start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
   ],
   "studyHolidays": [
-    {"title": "Practical Examinations & Preparation", "start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
+    {"title": "Preparation Leave", "start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
+  ],
+  "nonInstructionalDays": [
+    {"title": "Orientation Day", "date": "YYYY-MM-DD"}
   ],
   "workingSaturdays": ["YYYY-MM-DD"],
   "events": [
-    {"title": "Sports Day", "date": "YYYY-MM-DD"}
+    {"title": "Sports Day", "date": "YYYY-MM-DD", "hasClasses": false}
   ]
 }
 
-Categorization Rules for Indian Engineering College Calendars:
-- semesterStart: The "Commencement of Class Work" date
-- semesterEnd: The last date of "End Examinations" / "Semester Examinations"
-- midExams: Any row containing "Mid Examination", "Unit Test", "Internal Exam" — extract start and end dates
-- labExams: "Lab Examination" or "Practical Examination" periods that are clearly lab/practical exams
-- semesterBreak: Festival holidays like "Dasara", "Dussehra", "Puja Holidays", "Diwali Holidays", "Christmas Holidays", "Winter Break", "Summer Break"
-- examDates: "End Examination", "Semester Examination", "Final Examination" periods
-- studyHolidays: "Practical Examinations & Preparation", "Preparation Leave", "Study Holidays", "Pre-Exam Holiday" — these are days before end exams
-- holidays: Individual public holidays, national holidays (Independence Day, Republic Day, etc.)
-- workingSaturdays: Explicitly mentioned as "Special Working Saturday" or similar
-- events: College fests, sports days, annual day events
+Categorization Rules:
+- semesterStart: "Commencement of Class Work" or "Class Work Begins" date — NOT orientation/induction date
+- semesterEnd: Last date of End Examinations / Semester Examinations
+- midExams: Mid-I, Mid-II, MID-I, I Mid Examination, Internal Exam — attendance NOT counted
+- internalAssessments: IA-1, IA-2, Unit Test, CIE, Internal Assessment — attendance NOT counted
+- labExams: Lab Examination, Lab Assessment periods — attendance NOT counted
+- practicalExams: Practical Examination weeks separate from lab exams — attendance NOT counted
+- semesterBreak: Multi-day festival breaks (Dasara, Diwali, Christmas, Puja, Winter Break, Summer Vacation)
+- examDates: End Examination / Semester Examination / Theory Examination final exam period
+- studyHolidays: Preparation Leave, Study Holiday, Pre-Exam Leave — days just before end exams
+- nonInstructionalDays: Orientation, Induction, Convocation, Special Assembly — college open but no teaching
+- holidays: Individual public/national/festival holidays (single dates)
+  - type = "Public" for national holidays (Independence Day, Republic Day, Gandhi Jayanti)
+  - type = "Festival" for religious/regional festivals (Diwali, Pongal, Eid, Holi)
+  - type = "College" for college-declared holidays
+- workingSaturdays: Dates explicitly marked as "Special Working Saturday" or compensatory working day
+- events: College fests, Sports Day, Annual Day — set hasClasses=false if attendance not taken
 
 All dates MUST be in YYYY-MM-DD format. Convert from DD-MM-YYYY if needed.
 """
@@ -2339,10 +2516,13 @@ async def parse_calendar(
             "semesterEnd": parsed.get("semesterEnd") or "",
             "holidays": parsed.get("holidays") or [],
             "midExams": parsed.get("midExams") or [],
+            "internalAssessments": parsed.get("internalAssessments") or [],
             "labExams": parsed.get("labExams") or [],
+            "practicalExams": parsed.get("practicalExams") or [],
             "semesterBreak": parsed.get("semesterBreak") or [],
             "examDates": parsed.get("examDates") or [],
             "studyHolidays": parsed.get("studyHolidays") or [],
+            "nonInstructionalDays": parsed.get("nonInstructionalDays") or [],
             "workingSaturdays": parsed.get("workingSaturdays") or [],
             "events": parsed.get("events") or [],
             "model": successful_model
