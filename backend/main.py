@@ -1098,18 +1098,30 @@ def get_state(current_user: models.User = Depends(auth.get_current_user), db: Se
         
     logs = {}
     days_map = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    # Pre-load class sessions for this user to avoid N+1 queries when resolving end_times
+    session_map = {}
+    all_sessions = db.query(models.ClassSession).filter(models.ClassSession.user_id == user_id).all()
+    for cs in all_sessions:
+        session_map[cs.id] = cs
+
     for a in attendances:
         d_str = a.date.isoformat()
         if d_str not in logs:
             logs[d_str] = []
         
         day_str = days_map[a.date.weekday()]
-        
-        # Match using subject AND start_time (if available) to find the correct timetable entry for end_time
-        tt_entry = next((t for t in timetable if t.day == day_str and t.subject_id == a.subject_id and t.start_time == a.start_time), None)
-        
         start_str = a.start_time.strftime("%H:%M") if a.start_time else "00:00"
-        end_str = tt_entry.end_time.strftime("%H:%M") if tt_entry else "00:00"
+        
+        # Priority 1: use the linked ClassSession's end_time (calendar-driven flow)
+        if a.session_id and a.session_id in session_map:
+            end_str = session_map[a.session_id].end_time.strftime("%H:%M")
+        else:
+            # Fallback: match legacy Timetable entry by day + subject + start_time
+            tt_entry = next(
+                (t for t in timetable if t.day == day_str and t.subject_id == a.subject_id and t.start_time == a.start_time),
+                None
+            )
+            end_str = tt_entry.end_time.strftime("%H:%M") if tt_entry else "00:00"
         
         logs[d_str].append({
             "subject": sub_map[a.subject_id].name if a.subject_id in sub_map else "Unknown",
@@ -1153,7 +1165,26 @@ def get_state(current_user: models.User = Depends(auth.get_current_user), db: Se
             "total": stats["total"]
         },
         "bunkAnalysis": bunk_info,
-        "subjects": [{"id": s.id, "name": s.name, "code": s.code, "prof": s.prof, "color": s.color, "credits": s.credits, "minimum_required_attendance": s.minimum_required_attendance} for s in subjects],
+        "subjects": [
+            {
+                "id": s.id,
+                "name": s.name,
+                "code": s.code,
+                "prof": s.prof,
+                "color": s.color,
+                "credits": s.credits,
+                "minimum_required_attendance": s.minimum_required_attendance,
+                "subject_type": s.subject_type,
+                "weekly_classes": s.weekly_classes,
+                "total_planned_classes": s.total_planned_classes,
+                "baseline_conducted": s.baseline_conducted or 0,
+                "baseline_attended": s.baseline_attended or 0,
+                "current_conducted": s.current_conducted or 0,
+                "current_attended": s.current_attended or 0,
+                "last_synced_at": s.last_synced_at.isoformat() if s.last_synced_at else None,
+            }
+            for s in subjects
+        ],
         "timetable": tt_formatted,
         "attendanceLogs": logs
     }
