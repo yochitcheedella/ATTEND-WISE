@@ -13,3 +13,8 @@ backend/*.pyc
 # APK binaries - too large for GitHub. Distributed via GitHub Releases.
 *.apk
 *.idsig
+
+# Firebase / Google service account credentials - NEVER commit these
+backend/firebase-adminsdk-key.json
+backend/*-adminsdk-*.json
+*service-account*.json

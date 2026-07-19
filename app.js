@@ -20,7 +20,8 @@ function escapeHTML(str) {
     );
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || window.location.origin;
+const isLocalHost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+const API_BASE_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || (isLocalHost ? "http://127.0.0.1:8000" : window.location.origin);
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
@@ -84,6 +85,9 @@ window.fetch = async function(...args) {
             
             // Wipe token and force redirect to login
             localStorage.removeItem("access_token");
+            try {
+                await Preferences.remove({ key: "access_token" });
+            } catch (err) {}
             showAuthScreen();
             
             const mainContent = document.getElementById("main-content");
@@ -306,6 +310,11 @@ async function handleAuthSignIn(e) {
         if (response.ok) {
             const data = await response.json();
             localStorage.setItem("access_token", data.access_token);
+            try {
+                await Preferences.set({ key: "access_token", value: data.access_token });
+            } catch (err) {
+                console.warn("[Auth] Preferences.set failed", err);
+            }
             console.info("[Auth] Session saved.");
             authState = "Authenticated";
             showToast("Login Successful", "Welcome to AttendWise!", "check_circle");
@@ -404,6 +413,11 @@ async function handleAuthSignUp(e) {
             if (loginRes.ok) {
                 const data = await loginRes.json();
                 localStorage.setItem("access_token", data.access_token);
+                try {
+                    await Preferences.set({ key: "access_token", value: data.access_token });
+                } catch (err) {
+                    console.warn("[Auth] Preferences.set failed", err);
+                }
                 console.info("[Auth] Session saved after signup.");
                 authState = "Authenticated";
                 await initAppState();
@@ -438,6 +452,11 @@ async function handleAuthSignUp(e) {
 async function handleAuthSignOut() {
     if (confirm("Are you sure you want to sign out?")) {
         localStorage.removeItem("access_token");
+        try {
+            await Preferences.remove({ key: "access_token" });
+        } catch (err) {
+            console.warn("[Auth] Preferences.remove failed", err);
+        }
         if (supabase) {
             await supabase.auth.signOut();
         }
@@ -529,6 +548,16 @@ async function initAppState() {
 
     const statusEl = document.getElementById("splash-status");
     if (statusEl) statusEl.textContent = "Checking credentials...";
+
+    try {
+        const cachedToken = await Preferences.get({ key: "access_token" });
+        if (cachedToken && cachedToken.value) {
+            localStorage.setItem("access_token", cachedToken.value);
+            console.info("[Auth] Token restored from Capacitor Preferences");
+        }
+    } catch (prefErr) {
+        console.warn("[Auth] Failed to restore token from Capacitor Preferences", prefErr);
+    }
 
     if (!supabase) {
         console.warn("[App] Supabase missing. Falling back to FastAPI token check.");
@@ -638,6 +667,9 @@ async function initAppState() {
             if (window.capacitorPushNotifications) registerPushNotifications();
         } else if (response.status === 401) {
             localStorage.removeItem("access_token");
+            try {
+                await Preferences.remove({ key: "access_token" });
+            } catch (err) {}
             showAuthScreen();
             try { await SplashScreen.hide(); } catch(err){}
             removeSplashScreen();
@@ -948,8 +980,10 @@ function updateSyncPreview() {
     const subject = appState.subjects.find(s => s.id == subjectId);
     if (!subject) return;
     
-    const currConducted = subject.current_conducted || 0;
-    const currAttended = subject.current_attended || 0;
+    const subjectStats = calculateSubjectAttendance();
+    const statsObj = subjectStats[subject.name] || {};
+    const currConducted = statsObj.total || 0;
+    const currAttended = statsObj.present || 0;
     
     if (conducted < currConducted) {
         preview.classList.remove("hidden");
@@ -970,7 +1004,7 @@ function updateSyncPreview() {
     
     if (diffConducted < 0 || diffAttended < 0 || diffAttended > diffConducted) {
         preview.classList.remove("hidden");
-        previewText.innerHTML = `<span class="text-error font-bold">Error:</span> Invalid sync.`;
+        previewText.innerHTML = `<span class="text-error font-bold">Error:</span> Invalid sync. Conducted/attended diff cannot be negative, and attended diff cannot exceed conducted diff.`;
         btn.disabled = true;
         return;
     }
@@ -1080,14 +1114,27 @@ function getClassWeight(cls) {
     return Math.max(1, Math.min(4, Math.round(durationHours)));
 }
 
+/**
+ * Returns the period-weight for a subject object from appState.subjects.
+ * Lab/Practical subjects count as 3 periods; Theory subjects count as 1.
+ */
+function getSubjectWeight(sub) {
+    if (!sub) return 1;
+    const type = (sub.subject_type || sub.subjectType || '').toLowerCase();
+    const name = (sub.name || '').toLowerCase();
+    if (type === 'practical' || type === 'lab' || name.includes('lab')) return 3;
+    return 1;
+}
+
 
 function calculateGlobalAttendance() {
     let presentHours = 0;
     let absentHours = 0;
     
     appState.subjects.forEach(sub => {
-        presentHours += (sub.baseline_attended || 0);
-        absentHours += ((sub.baseline_conducted || 0) - (sub.baseline_attended || 0));
+        const w = getSubjectWeight(sub);
+        presentHours += (sub.baseline_attended || 0) * w;
+        absentHours += ((sub.baseline_conducted || 0) - (sub.baseline_attended || 0)) * w;
     });
     
     Object.values(appState.attendanceLogs).forEach(dayLogs => {
@@ -1114,11 +1161,12 @@ function calculateSubjectAttendance() {
     
     // Initialize subjects list
     appState.subjects.forEach(sub => {
+        const w = getSubjectWeight(sub);
         subjectStats[sub.name] = { 
             id: sub.id,
-            present: sub.baseline_attended || 0, 
-            absent: (sub.baseline_conducted || 0) - (sub.baseline_attended || 0), 
-            total: sub.baseline_conducted || 0, 
+            present: (sub.baseline_attended || 0) * w, 
+            absent: ((sub.baseline_conducted || 0) - (sub.baseline_attended || 0)) * w, 
+            total: (sub.baseline_conducted || 0) * w, 
             percent: 0, 
             code: sub.code || "", 
             color: sub.color || "#7c4dff",
@@ -1507,11 +1555,61 @@ function renderDashboard() {
     renderDashboardRecentLogs();
     renderDashboardAiInsights(global, analysis, displayStreak);
     updateSemesterDashboard();
+    renderPendingAttendancePrompt();
 
     if (localStorage.getItem("widget_enabled") === "true") {
         updateFloatingWidgetData();
     }
 }
+
+function renderPendingAttendancePrompt() {
+    const container = document.getElementById("dash-pending-attendance-container");
+    if (!container) return;
+    
+    const today = new Date();
+    const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const dayName = weekdays[today.getDay()];
+    
+    // Don't show prompts on Sunday
+    if (dayName === "Sun") {
+        container.classList.add("hidden");
+        return;
+    }
+    
+    const todayStr = formatDateKey(today);
+    const todaySessions = ensureDailyScheduleReady(todayStr);
+    const nowStr = today.toTimeString().split(" ")[0].slice(0, 5); // "HH:MM"
+    
+    // Find the first upcoming session that has already ended
+    const pendingSession = todaySessions.find(s => s.status === "upcoming" && s.end && s.end.localeCompare(nowStr) <= 0);
+    
+    if (pendingSession) {
+        document.getElementById("dash-pending-class-name").textContent = `Did you attend ${pendingSession.subject}?`;
+        document.getElementById("dash-pending-class-time").textContent = `${formatTimeAmPm(pendingSession.start)} - ${formatTimeAmPm(pendingSession.end)}`;
+        
+        // Setup button click handlers
+        document.getElementById("dash-pending-yes-btn").onclick = async () => {
+            await updateRecordStatus(todayStr, pendingSession.subject, pendingSession.start, 'present');
+            renderPendingAttendancePrompt();
+            renderDashboard();
+        };
+        document.getElementById("dash-pending-no-btn").onclick = async () => {
+            await updateRecordStatus(todayStr, pendingSession.subject, pendingSession.start, 'absent');
+            renderPendingAttendancePrompt();
+            renderDashboard();
+        };
+        document.getElementById("dash-pending-cancel-btn").onclick = async () => {
+            await updateRecordStatus(todayStr, pendingSession.subject, pendingSession.start, 'cancelled');
+            renderPendingAttendancePrompt();
+            renderDashboard();
+        };
+        
+        container.classList.remove("hidden");
+    } else {
+        container.classList.add("hidden");
+    }
+}
+
 
 // --- DASHBOARD BENTO WIDGETS ---
 
@@ -4079,6 +4177,20 @@ function compileLocalReportData(period, startDate, endDate) {
         }
     });
     
+    if (period === "semester") {
+        appState.subjects.forEach(sub => {
+            if (subjectStats[sub.name]) {
+                const w = getSubjectWeight(sub);
+                subjectStats[sub.name].present += (sub.baseline_attended || 0) * w;
+                subjectStats[sub.name].total += (sub.baseline_conducted || 0) * w;
+                subjectStats[sub.name].absent += ((sub.baseline_conducted || 0) - (sub.baseline_attended || 0)) * w;
+                
+                present += (sub.baseline_attended || 0) * w;
+                absent += ((sub.baseline_conducted || 0) - (sub.baseline_attended || 0)) * w;
+            }
+        });
+    }
+    
     const total = present + absent;
     const percentage = total > 0 ? roundDecimal((present / total * 100), 2) : 0.0;
     
@@ -5219,6 +5331,29 @@ function updateSemesterDashboard() {
     
     // End-of-Semester Predictor table
     const global = calculateGlobalAttendance();
+    
+    // Calculate subject goal statuses (above/below target goal)
+    const subjectStats = calculateSubjectAttendance();
+    let aboveGoalCount = 0;
+    let belowGoalCount = 0;
+    Object.values(subjectStats).forEach(s => {
+        if (s.total > 0) {
+            if (s.percent >= s.min_req) {
+                aboveGoalCount++;
+            } else {
+                belowGoalCount++;
+            }
+        }
+    });
+    
+    const overallPctEl = document.getElementById("sem-card-overall-pct");
+    const overallClassesEl = document.getElementById("sem-card-overall-classes");
+    const subjectsSummaryEl = document.getElementById("sem-card-subjects-summary");
+    
+    if (overallPctEl) overallPctEl.textContent = `${global.percentage}%`;
+    if (overallClassesEl) overallClassesEl.textContent = `${global.present} / ${global.total} Classes`;
+    if (subjectsSummaryEl) subjectsSummaryEl.textContent = `${aboveGoalCount} Above / ${belowGoalCount} Below`;
+    
     const predictorBody = document.getElementById("sem-card-predictor-table-body");
     predictorBody.innerHTML = "";
     

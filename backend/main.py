@@ -14,12 +14,69 @@ import math
 import secrets
 import hashlib
 import firebase_admin
-from firebase_admin import credentials, messaging
-try:
-    cred = credentials.Certificate('backend/firebase-adminsdk-key.json')
-    firebase_admin.initialize_app(cred)
-except Exception as e:
-    print(f'Firebase Admin init failed (missing file or invalid key): {e}')
+from firebase_admin import credentials, messaging as fb_messaging
+
+# ── Firebase Admin SDK initialization ─────────────────────────────────────────
+# Supports three modes (in priority order):
+#   1. FIREBASE_CREDENTIALS_JSON env var — raw JSON string (for cloud/Render/Heroku)
+#   2. FIREBASE_CREDENTIALS_PATH env var — path to a service-account JSON file
+#   3. Fallback: tries 'backend/firebase-adminsdk-key.json' (legacy dev path)
+# When none are available, Firebase is disabled gracefully (push notifications
+# will be silently skipped; all other features continue to work normally).
+firebase_available = False
+_fcm_messaging = None
+
+def _init_firebase():
+    global firebase_available, _fcm_messaging
+    # Mode 1: raw JSON string in environment variable
+    raw_json = os.getenv("FIREBASE_CREDENTIALS_JSON", "").strip()
+    if raw_json:
+        try:
+            import json as _json
+            _cert_dict = _json.loads(raw_json)
+            cred = credentials.Certificate(_cert_dict)
+            firebase_admin.initialize_app(cred)
+            _fcm_messaging = fb_messaging
+            firebase_available = True
+            print("[Firebase] Initialized via FIREBASE_CREDENTIALS_JSON env var.", flush=True)
+            return
+        except Exception as e:
+            print(f"[Firebase] FIREBASE_CREDENTIALS_JSON parse/init failed: {e}", flush=True)
+
+    # Mode 2: file path from env variable
+    creds_path = os.getenv("FIREBASE_CREDENTIALS_PATH", "").strip()
+    if creds_path and os.path.isfile(creds_path):
+        try:
+            cred = credentials.Certificate(creds_path)
+            firebase_admin.initialize_app(cred)
+            _fcm_messaging = fb_messaging
+            firebase_available = True
+            print(f"[Firebase] Initialized via FIREBASE_CREDENTIALS_PATH: {creds_path}", flush=True)
+            return
+        except Exception as e:
+            print(f"[Firebase] FIREBASE_CREDENTIALS_PATH init failed: {e}", flush=True)
+
+    # Mode 3: legacy fallback file
+    legacy_path = "backend/firebase-adminsdk-key.json"
+    if os.path.isfile(legacy_path):
+        try:
+            cred = credentials.Certificate(legacy_path)
+            firebase_admin.initialize_app(cred)
+            _fcm_messaging = fb_messaging
+            firebase_available = True
+            print(f"[Firebase] Initialized via legacy path: {legacy_path}", flush=True)
+            return
+        except Exception as e:
+            print(f"[Firebase] Legacy path init failed: {e}", flush=True)
+
+    print(
+        "[Firebase] Not configured — push notifications disabled. "
+        "Set FIREBASE_CREDENTIALS_JSON (raw JSON string) or "
+        "FIREBASE_CREDENTIALS_PATH (path to service account JSON) to enable.",
+        flush=True
+    )
+
+_init_firebase()
 
 from fastapi.security import OAuth2PasswordRequestForm
 from . import models, schemas, auth
@@ -211,6 +268,19 @@ frontend_dist = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__f
 if os.path.exists(frontend_dist):
     app.mount("/assets", StaticFiles(directory=os.path.join(frontend_dist, "assets")), name="assets")
 
+@app.get("/attendwise.apk", tags=["Root"])
+def download_apk():
+    # Check in dist first (where npm run build puts it) then fall back to root or public directories
+    possible_paths = [
+        os.path.join(frontend_dist, "attendwise.apk"),
+        os.path.join(os.path.dirname(frontend_dist), "public", "attendwise.apk"),
+        os.path.join(os.path.dirname(frontend_dist), "attendwise.apk")
+    ]
+    for path in possible_paths:
+        if os.path.exists(path):
+            return FileResponse(path, media_type="application/vnd.android.package-archive", filename="attendwise.apk")
+    raise HTTPException(status_code=404, detail="APK file not found")
+
 # --- Health / Wake-up endpoints ---
 @app.get("/ping", tags=["Health"])
 def ping():
@@ -325,9 +395,36 @@ def sync_subject_attendance(subject_id: int, request: schemas.SyncAttendanceRequ
     if not db_sub:
         raise HTTPException(status_code=404, detail="Subject not found")
     
+    # 1. Smart Validation
+    if request.conducted < 0 or request.attended < 0:
+        raise HTTPException(status_code=400, detail="Conducted and attended classes cannot be negative.")
+        
+    if request.attended > request.conducted:
+        raise HTTPException(status_code=400, detail="Attended classes cannot exceed conducted classes.")
+        
+    # Query all attendance logs for this subject to count logs_conducted and logs_attended
+    logs = db.query(models.Attendance).filter(
+        models.Attendance.user_id == current_user.id,
+        models.Attendance.subject_id == subject_id,
+        models.Attendance.status.in_(["present", "absent"])
+    ).all()
+    
+    # Calculate weighted logs
+    sub_map = {db_sub.id: db_sub}
+    logs_present = sum(_get_attendance_weight(a, sub_map) for a in logs if a.status.lower() in ("present", "late_entry", "od", "event_leave", "medical_leave"))
+    logs_absent = sum(_get_attendance_weight(a, sub_map) for a in logs if a.status.lower() == "absent")
+    logs_conducted = logs_present + logs_absent
+    logs_attended = logs_present
+    
+    # Old totals
+    old_total_conducted = db_sub.baseline_conducted + logs_conducted
+    if request.conducted < old_total_conducted:
+        raise HTTPException(status_code=400, detail=f"Cannot reduce overall conducted classes (current: {old_total_conducted}, new: {request.conducted}).")
+        
     try:
-        db_sub.baseline_conducted = request.conducted
-        db_sub.baseline_attended = request.attended
+        # 2. Baseline synchronization (set baseline to match requested totals minus logs)
+        db_sub.baseline_conducted = max(0, request.conducted - logs_conducted)
+        db_sub.baseline_attended = max(0, request.attended - logs_attended)
         db_sub.last_synced_at = datetime.now(timezone.utc)
         
         db.commit()
@@ -336,6 +433,7 @@ def sync_subject_attendance(subject_id: int, request: schemas.SyncAttendanceRequ
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
+
 
 # --- Timetable Endpoints ---
 @app.post("/timetable", response_model=schemas.Timetable, tags=["Timetable"])
@@ -407,12 +505,16 @@ def _compute_streak(user_id: int, db: Session) -> int:
     return streak
 
 
+def _get_subject_weight(sub: models.Subject) -> int:
+    """Return the period-weight for a subject: 3 for lab/practical, 1 for theory."""
+    if sub.subject_type.lower() in ('practical', 'lab') or 'lab' in sub.name.lower():
+        return 3
+    return 1
+
 def _get_attendance_weight(att: models.Attendance, subject_map: dict = None) -> int:
     # If the subject is a lab/practical, weight = 3, else 1
     if subject_map and att.subject_id in subject_map:
-        sub = subject_map[att.subject_id]
-        if sub.subject_type.lower() == 'practical' or 'lab' in sub.name.lower():
-            return 3
+        return _get_subject_weight(subject_map[att.subject_id])
     return 1
 
 def _compute_global_stats(user_id: int, db: Session):
@@ -425,6 +527,13 @@ def _compute_global_stats(user_id: int, db: Session):
     
     present = sum(_get_attendance_weight(a, sub_map) for a in attendances if a.status.lower() in ("present", "late_entry", "od", "event_leave", "medical_leave"))
     absent = sum(_get_attendance_weight(a, sub_map) for a in attendances if a.status.lower() == "absent")
+    
+    # Include baselines (imported attendance), weighted by subject type
+    for sub in subjects:
+        w = _get_subject_weight(sub)
+        present += (sub.baseline_attended or 0) * w
+        absent += max(0, (sub.baseline_conducted or 0) - (sub.baseline_attended or 0)) * w
+        
     total = present + absent
     percentage = round((present / total * 100), 2) if total > 0 else 0.0
     
@@ -542,6 +651,12 @@ def get_detailed_analytics(current_user: models.User = Depends(auth.get_current_
         sub_map = {sub.id: sub}
         p = sum(_get_attendance_weight(a, sub_map) for a in sub_atts if a.status.lower() in ("present", "late_entry", "od", "event_leave", "medical_leave"))
         ab = sum(_get_attendance_weight(a, sub_map) for a in sub_atts if a.status.lower() == "absent")
+        
+        # Include baseline values, weighted by subject type (lab = 3 periods)
+        w = _get_subject_weight(sub)
+        p += (sub.baseline_attended or 0) * w
+        ab += max(0, (sub.baseline_conducted or 0) - (sub.baseline_attended or 0)) * w
+        
         total = p + ab
         pct = round(p / total * 100, 1) if total > 0 else 0.0
         subject_stats[sub.name] = {
@@ -816,6 +931,13 @@ def get_report_summary(
     absent = sum(1 for a in attendances if a.status.lower() == "absent")
     cancelled = sum(1 for a in attendances if a.status.lower() == "cancelled")
     holidays = sum(1 for a in attendances if a.status.lower() == "holiday")
+    
+    if period == "semester":
+        for sub in subjects:
+            w = _get_subject_weight(sub)
+            present += (sub.baseline_attended or 0) * w
+            absent += max(0, (sub.baseline_conducted or 0) - (sub.baseline_attended or 0)) * w
+            
     total = present + absent
     percentage = round((present / total * 100), 2) if total > 0 else 0.0
     
@@ -825,6 +947,12 @@ def get_report_summary(
         sub_atts = [a for a in attendances if a.subject_id == sub.id]
         s_present = sum(1 for a in sub_atts if a.status.lower() in ("present", "late_entry", "od", "event_leave", "medical_leave"))
         s_absent = sum(1 for a in sub_atts if a.status.lower() == "absent")
+        
+        if period == "semester":
+            w = _get_subject_weight(sub)
+            s_present += (sub.baseline_attended or 0) * w
+            s_absent += max(0, (sub.baseline_conducted or 0) - (sub.baseline_attended or 0)) * w
+            
         s_total = s_present + s_absent
         s_pct = round((s_present / s_total * 100), 2) if s_total > 0 else 0.0
         subject_breakdown.append({
@@ -2137,6 +2265,8 @@ async def parse_calendar(
         }
     }
 
+    headers = {"Content-Type": "application/json"}
+
     models_to_try = [
         "gemini-2.5-flash", 
         "gemini-2.0-flash", 
@@ -2579,16 +2709,21 @@ def read_root():
 
 # --- FCM Push Notifications ---
 def send_push_notification(fcm_token: str, title: str, body: str):
-    if not fcm_token: return
+    """Send a FCM push notification. Silently skips if Firebase is not configured."""
+    if not fcm_token:
+        return
+    if not firebase_available or _fcm_messaging is None:
+        print(f"[FCM] Skipped (Firebase not configured): {title} -> {body[:60]}", flush=True)
+        return
     try:
-        from firebase_admin import messaging
-        message = messaging.Message(
-            notification=messaging.Notification(title=title, body=body),
+        message = _fcm_messaging.Message(
+            notification=_fcm_messaging.Notification(title=title, body=body),
             token=fcm_token
         )
-        messaging.send(message)
+        _fcm_messaging.send(message)
+        print(f"[FCM] Sent: {title} to token ...{fcm_token[-8:]}", flush=True)
     except Exception as e:
-        print(f'Failed to send FCM: {e}', flush=True)
+        print(f"[FCM] Failed to send notification: {e}", flush=True)
 
 import asyncio
 from datetime import datetime, timedelta
