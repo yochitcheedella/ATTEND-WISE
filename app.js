@@ -5686,8 +5686,8 @@ window.handleGoogleSignIn = handleGoogleSignIn;
 window.addEventListener('error', function(e) {
     console.error('Global Error Caught:', e.error || e.message);
     if (!document.getElementById('global-error-toast')) {
-        showToast('App Error', 'An unexpected error occurred. Restarting app...', 'error');
-        setTimeout(() => location.reload(), 3000);
+        showToast('App Error', (e.message || 'An unexpected error occurred') + ' - check console', 'error');
+        // setTimeout(() => location.reload(), 3000);
     }
 });
 window.addEventListener('unhandledrejection', function(e) {
