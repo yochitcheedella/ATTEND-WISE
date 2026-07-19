@@ -958,8 +958,10 @@ def get_report_summary(
     # Overall stats
     present = sum(1 for a in attendances if a.status.lower() in ("present", "late_entry", "od", "event_leave", "medical_leave"))
     absent = sum(1 for a in attendances if a.status.lower() == "absent")
+    # Non-instructional record counts (for summary display, NOT included in attendance %)
+    non_instructional_statuses = {"holiday", "exam", "event"}
     cancelled = sum(1 for a in attendances if a.status.lower() == "cancelled")
-    holidays = sum(1 for a in attendances if a.status.lower() == "holiday")
+    holidays = sum(1 for a in attendances if a.status.lower() in non_instructional_statuses)
     
     if period == "semester":
         for sub in subjects:
@@ -1574,15 +1576,24 @@ def create_holiday(
         type=holiday.type
     )
     db.add(db_holiday)
-    
-    # Mark any class sessions on this date as holiday status
+
+    # Mark sessions on this date with the correct non-instructional status
+    # (exam/break/study → 'exam', events → 'event', all other holidays → 'holiday')
+    htype = holiday.type or "Holiday"
+    if htype in ("Exam", "Break", "Study"):
+        session_status = "exam"
+    elif htype == "Event":
+        session_status = "event"
+    else:
+        session_status = "holiday"
+
     db.query(models.ClassSession).filter(
         models.ClassSession.user_id == current_user.id,
         models.ClassSession.semester_id == semester_id,
         models.ClassSession.date == holiday.date,
         models.ClassSession.status == "upcoming"
-    ).update({"status": "holiday"})
-    
+    ).update({"status": session_status})
+
     db.commit()
     db.refresh(db_holiday)
     return db_holiday
@@ -1771,23 +1782,45 @@ def _generate_sessions_for_version(db: Session, user_id: int, version: models.Ti
         models.Holiday.user_id == user_id,
         models.Holiday.semester_id == semester.id
     ).all()
-    holiday_dates = {h.date for h in holidays}
-    
+    # Build date→type map so we assign the correct session status per holiday type
+    holiday_type_map = {h.date: h.type for h in holidays}
+    holiday_dates = set(holiday_type_map.keys())
+
+    # Parse working Saturdays from calendar
+    working_saturdays = set()
+    if semester.academic_calendar:
+        try:
+            cal = json.loads(semester.academic_calendar)
+            working_saturdays = {date.fromisoformat(d) for d in cal.get("workingSaturdays", [])}
+        except Exception:
+            pass
+
     days_map = {0: "Mon", 1: "Tue", 2: "Wed", 3: "Thu", 4: "Fri", 5: "Sat", 6: "Sun"}
-    
+
     entries = db.query(models.Timetable).filter(models.Timetable.version_id == version.id).all()
-    
+
     from collections import defaultdict
     day_entries = defaultdict(list)
     for entry in entries:
         day_entries[entry.day].append(entry)
-        
+
     curr = start_gen
     to_add = []
     while curr <= end_gen:
         day_str = days_map[curr.weekday()]
-        status = "holiday" if curr in holiday_dates else "upcoming"
-        
+
+        # Apply the same granular status logic as _generate_sessions_for_active_semester
+        if curr in holiday_dates and curr not in working_saturdays:
+            htype = holiday_type_map.get(curr, "Holiday")
+            if htype in ("Exam", "Break", "Study"):
+                status = "exam"
+            elif htype == "Event":
+                status = "event"
+            else:
+                status = "holiday"
+        else:
+            status = "upcoming"
+
         for entry in day_entries[day_str]:
             key = (curr, entry.start_time, entry.subject_id)
             if key not in existing_keys:
@@ -1804,7 +1837,7 @@ def _generate_sessions_for_version(db: Session, user_id: int, version: models.Ti
                     is_extra=False
                 ))
         curr += timedelta(days=1)
-        
+
     if to_add:
         db.add_all(to_add)
         db.commit()

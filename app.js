@@ -1982,17 +1982,34 @@ function ensureDailyScheduleReady(dateKey) {
     const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     const dayName = weekdays[d.getDay()];
     
-    // Check if this date is an academic holiday
-    const isAcademicHoliday = appState.holidays && appState.holidays.some(h => {
-        const hDateStr = typeof h.date === "string" ? h.date : h.date.toISOString().split("T")[0];
-        return hDateStr === dateKey;
-    });
-    
+    // Check if this date is an academic holiday, and which type
+    let defaultNonInstructionalStatus = null; // null means it's a regular day
+    if (appState.holidays && appState.holidays.length > 0) {
+        const matchedHoliday = appState.holidays.find(h => {
+            const hDateStr = typeof h.date === "string" ? h.date : h.date.toISOString().split("T")[0];
+            return hDateStr === dateKey;
+        });
+        if (matchedHoliday) {
+            const htype = matchedHoliday.type || "Holiday";
+            if (["Exam", "Break", "Study"].includes(htype)) {
+                defaultNonInstructionalStatus = "exam";
+            } else if (htype === "Event") {
+                defaultNonInstructionalStatus = "event";
+            } else {
+                defaultNonInstructionalStatus = "holiday";
+            }
+        }
+    }
+    // Also check the combined non-instructional set (calendar ranges not yet in Holiday table)
+    if (!defaultNonInstructionalStatus && getCombinedHolidayDates().includes(dateKey)) {
+        defaultNonInstructionalStatus = "exam"; // calendar-based exclusion → treat as exam period
+    }
+
     // Get expected classes from timetable
     const dayClasses = appState.timetable.filter(c => c.day === dayName).map(c => ({...c}));
-    
+
     let existingLogs = appState.attendanceLogs[dateKey] || [];
-    
+
     // Merge expected classes with existing logs from backend
     let mergedLogs = dayClasses.map(c => {
         let existing = existingLogs.find(r => r.subject === c.subject && r.start === c.start);
@@ -2009,11 +2026,12 @@ function ensureDailyScheduleReady(dateKey) {
                 subject: c.subject,
                 start: c.start,
                 end: c.end,
-                status: isAcademicHoliday ? "holiday" : "upcoming",
+                status: defaultNonInstructionalStatus || "upcoming",
                 color: c.color
             };
         }
     });
+
     
     // Check if there are any existing logs that are NOT in the timetable
     existingLogs.forEach(el => {
