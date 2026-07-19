@@ -20,8 +20,9 @@ function escapeHTML(str) {
     );
 }
 
-const isLocalHost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-const API_BASE_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || (isLocalHost ? "http://127.0.0.1:8000" : window.location.origin);
+const isNative = (window.Capacitor && window.Capacitor.isNative) || window.location.href.startsWith("capacitor://") || (window.location.hostname === "localhost" && window.location.port === "");
+const isLocalHost = (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") && window.location.port !== "";
+const API_BASE_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || (isNative ? "https://attend-wise.onrender.com" : (isLocalHost ? "http://127.0.0.1:8000" : window.location.origin));
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
