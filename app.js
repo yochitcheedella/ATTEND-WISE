@@ -3184,6 +3184,7 @@ function renderCalendarSelectedDayDetails() {
         item.style.borderLeftStyle = "solid";
         
         let statusBadge = `<span class="px-2 py-0.5 bg-surface-container-highest text-on-surface-variant rounded-full text-[9px] uppercase font-bold tracking-wider">Upcoming</span>`;
+        const isNonInstructional = ["holiday", "exam", "event"].includes(rec.status);
         if (rec.status === "present") {
             statusBadge = `<span class="px-2 py-0.5 bg-secondary/15 text-secondary rounded-full text-[9px] uppercase font-bold tracking-wider border border-secondary/20">Present</span>`;
         } else if (rec.status === "absent") {
@@ -3192,8 +3193,12 @@ function renderCalendarSelectedDayDetails() {
             statusBadge = `<span class="px-2 py-0.5 bg-tertiary/15 text-on-tertiary-container rounded-full text-[9px] uppercase font-bold tracking-wider border border-tertiary/20">Cancelled</span>`;
         } else if (rec.status === "holiday") {
             statusBadge = `<span class="px-2 py-0.5 bg-outline-variant/15 text-on-surface-variant rounded-full text-[9px] uppercase font-bold tracking-wider border border-outline-variant/20">Holiday</span>`;
+        } else if (rec.status === "exam") {
+            statusBadge = `<span class="px-2 py-0.5 bg-amber-400/15 text-amber-400 rounded-full text-[9px] uppercase font-bold tracking-wider border border-amber-400/20">📝 Exam Day</span>`;
+        } else if (rec.status === "event") {
+            statusBadge = `<span class="px-2 py-0.5 bg-blue-400/15 text-blue-400 rounded-full text-[9px] uppercase font-bold tracking-wider border border-blue-400/20">🎉 Event</span>`;
         }
-        
+
         item.innerHTML = `
             <div class="flex justify-between items-start">
                 <div>
@@ -3204,20 +3209,26 @@ function renderCalendarSelectedDayDetails() {
                     ${statusBadge}
                 </div>
             </div>
-            <div class="grid grid-cols-4 gap-1 pt-1.5 border-t border-outline-variant/30">
-                <button class="${rec.status === 'present' ? 'bg-secondary text-zinc-950 font-bold' : 'border border-outline-variant text-on-surface-variant hover:bg-surface-container-high'} flex flex-col items-center justify-center py-1 rounded-lg text-[8px] active:scale-95 transition-all" onclick="updateCalendarRecordStatus('${selectedCalendarDateStr}', '${rec.subject}', '${rec.start}', 'present')">
-                    <span>PRESENT</span>
-                </button>
-                <button class="${rec.status === 'absent' ? 'bg-error text-zinc-950 font-bold' : 'border border-outline-variant text-on-surface-variant hover:bg-surface-container-high'} flex flex-col items-center justify-center py-1 rounded-lg text-[8px] active:scale-95 transition-all" onclick="updateCalendarRecordStatus('${selectedCalendarDateStr}', '${rec.subject}', '${rec.start}', 'absent')">
-                    <span>ABSENT</span>
-                </button>
-                <button class="${rec.status === 'cancelled' ? 'bg-tertiary text-zinc-950 font-bold' : 'border border-outline-variant text-on-surface-variant hover:bg-surface-container-high'} flex flex-col items-center justify-center py-1 rounded-lg text-[8px] active:scale-95 transition-all" onclick="updateCalendarRecordStatus('${selectedCalendarDateStr}', '${rec.subject}', '${rec.start}', 'cancelled')">
-                    <span>CANCEL</span>
-                </button>
-                <button class="${rec.status === 'holiday' ? 'bg-on-surface-variant text-zinc-950 font-bold' : 'border border-outline-variant text-on-surface-variant hover:bg-surface-container-high'} flex flex-col items-center justify-center py-1 rounded-lg text-[8px] active:scale-95 transition-all" onclick="updateCalendarRecordStatus('${selectedCalendarDateStr}', '${rec.subject}', '${rec.start}', 'holiday')">
-                    <span>HOLIDAY</span>
-                </button>
-            </div>
+            ${ isNonInstructional
+                ? `<div class="flex items-center gap-1.5 pt-1.5 border-t border-outline-variant/30 text-on-surface-variant text-[10px]">
+                       <span class="material-symbols-outlined text-[13px]">info</span>
+                       <span>Not counted in attendance.</span>
+                   </div>`
+                : `<div class="grid grid-cols-4 gap-1 pt-1.5 border-t border-outline-variant/30">
+                       <button class="${rec.status === 'present' ? 'bg-secondary text-zinc-950 font-bold' : 'border border-outline-variant text-on-surface-variant hover:bg-surface-container-high'} flex flex-col items-center justify-center py-1 rounded-lg text-[8px] active:scale-95 transition-all" onclick="updateCalendarRecordStatus('${selectedCalendarDateStr}', '${rec.subject}', '${rec.start}', 'present')">
+                           <span>PRESENT</span>
+                       </button>
+                       <button class="${rec.status === 'absent' ? 'bg-error text-zinc-950 font-bold' : 'border border-outline-variant text-on-surface-variant hover:bg-surface-container-high'} flex flex-col items-center justify-center py-1 rounded-lg text-[8px] active:scale-95 transition-all" onclick="updateCalendarRecordStatus('${selectedCalendarDateStr}', '${rec.subject}', '${rec.start}', 'absent')">
+                           <span>ABSENT</span>
+                       </button>
+                       <button class="${rec.status === 'cancelled' ? 'bg-tertiary text-zinc-950 font-bold' : 'border border-outline-variant text-on-surface-variant hover:bg-surface-container-high'} flex flex-col items-center justify-center py-1 rounded-lg text-[8px] active:scale-95 transition-all" onclick="updateCalendarRecordStatus('${selectedCalendarDateStr}', '${rec.subject}', '${rec.start}', 'cancelled')">
+                           <span>CANCEL</span>
+                       </button>
+                       <button class="${rec.status === 'holiday' ? 'bg-on-surface-variant text-zinc-950 font-bold' : 'border border-outline-variant text-on-surface-variant hover:bg-surface-container-high'} flex flex-col items-center justify-center py-1 rounded-lg text-[8px] active:scale-95 transition-all" onclick="updateCalendarRecordStatus('${selectedCalendarDateStr}', '${rec.subject}', '${rec.start}', 'holiday')">
+                           <span>HOLIDAY</span>
+                       </button>
+                   </div>`
+            }
         `;
         classesContainer.appendChild(item);
     });
@@ -3228,6 +3239,11 @@ async function updateCalendarRecordStatus(dateKey, subject, start, status) {
     if (list) {
         const record = list.find(r => r.subject === subject && r.start === start);
         if (record) {
+            // Guard: don't allow marking present/absent on non-instructional sessions
+            if (["holiday", "exam", "event"].includes(record.status) && ["present", "absent"].includes(status)) {
+                showToast("Not Allowed", "Attendance is not counted on exam/holiday days.", "block");
+                return;
+            }
             record.status = status;
             
             try {
@@ -3413,6 +3429,38 @@ async function saveProfileSettings(e) {
     } catch (e) {
         console.error("Failed to save profile", e);
         showToast("Error", "Could not connect to backend server", "error");
+    }
+}
+
+/**
+ * Retroactively reclassify existing ClassSession rows based on the stored academic_calendar.
+ * Called from Settings \u2192 "Recalculate Sessions" button.
+ * Useful for users who completed onboarding before the exam-exclusion logic was added.
+ */
+async function recalculateCurrentSemester() {
+    if (!appState.activeSemester || !appState.activeSemester.id) {
+        showToast("No Semester", "No active semester found. Complete onboarding first.", "warning");
+        return;
+    }
+    const semId = appState.activeSemester.id;
+    const btn = document.querySelector('button[onclick="recalculateCurrentSemester()"]');
+    if (btn) { btn.disabled = true; btn.textContent = "Recalculating..."; }
+
+    try {
+        const resp = await fetchWithAuth(`${API_BASE_URL}/semesters/${semId}/recalculate`, { method: "POST" });
+        if (resp.ok) {
+            const result = await resp.json();
+            showToast("Sessions Reclassified \u2713", result.message || "Done! Exam & holiday sessions have been updated.", "check_circle");
+            // Refresh state so attendance calculations reflect the new session statuses
+            await loadAppState();
+        } else {
+            const err = await resp.json().catch(() => ({}));
+            showToast("Recalculate Failed", err.detail || "Could not reclassify sessions.", "error");
+        }
+    } catch (e) {
+        showToast("Error", "Could not connect to the server.", "error");
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = "Recalculate Sessions"; }
     }
 }
 
