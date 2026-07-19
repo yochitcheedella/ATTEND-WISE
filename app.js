@@ -4872,9 +4872,24 @@ async function saveOnboardingWizardData() {
     }
     
     const saveBtn = document.getElementById("ob-save-btn");
+    const originalBtnText = "Start Tracking";
     if (saveBtn) {
         saveBtn.disabled = true;
         saveBtn.textContent = "Setting Up Semester...";
+    }
+    
+    // Helper: fetch with a timeout
+    async function fetchWithTimeout(url, options, timeoutMs = 30000) {
+        const controller = new AbortController();
+        const id = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            const res = await fetch(url, { ...options, signal: controller.signal });
+            clearTimeout(id);
+            return res;
+        } catch (err) {
+            clearTimeout(id);
+            throw err;
+        }
     }
     
     try {
@@ -4889,31 +4904,27 @@ async function saveOnboardingWizardData() {
         const term = document.getElementById("ob-semester").value;
         const targetGoal = parseInt(document.getElementById("ob-goal").value) || 75;
         
-        // Update user profile info first
+        // Step 1: Update user profile
+        if (saveBtn) saveBtn.textContent = "Step 1/3: Saving Profile...";
         if (college || branch || term || targetGoal) {
-            await fetch(`${API_BASE_URL}/user/profile`, {
+            await fetchWithTimeout(`${API_BASE_URL}/user/profile`, {
                 method: "PUT",
-                headers: {
-                    "Content-Type": "application/json",
-                    ...getAuthHeaders()
-                },
+                headers: { "Content-Type": "application/json", ...getAuthHeaders() },
                 body: JSON.stringify({
-                    name: appState.profile.name || "Sarah Jenkins",
+                    name: appState.profile.name || "Student",
                     college: college || appState.profile.college,
                     branch: branch || appState.profile.branch,
                     semester: term || appState.profile.term,
                     attendance_goal: parseFloat(targetGoal)
                 })
-            });
+            }, 15000);
         }
         
-        // 1. Create active semester on backend
-        const semResponse = await fetch(`${API_BASE_URL}/semesters`, {
+        // Step 2: Create semester
+        if (saveBtn) saveBtn.textContent = "Step 2/3: Creating Semester...";
+        const semResponse = await fetchWithTimeout(`${API_BASE_URL}/semesters`, {
             method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                ...getAuthHeaders()
-            },
+            headers: { "Content-Type": "application/json", ...getAuthHeaders() },
             body: JSON.stringify({
                 name: term,
                 academic_year: academicYear,
@@ -4921,40 +4932,30 @@ async function saveOnboardingWizardData() {
                 end_date: endVal,
                 academic_calendar: JSON.stringify(parsedCalendarData)
             })
-        });
+        }, 15000);
         
         if (!semResponse.ok) {
             const err = await semResponse.json();
             showToast("Setup Failed", err.detail || "Could not set semester dates.", "error");
-            if (saveBtn) {
-                saveBtn.disabled = false;
-                saveBtn.textContent = "Start Tracking";
-            }
+            if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = originalBtnText; }
             return;
         }
         
         const semData = await semResponse.json();
         appState.activeSemester = semData;
         
-        // 2. Sync timetable schedule
+        // Step 3: Sync timetable (this triggers session generation — may take 10-20s on cold start)
+        if (saveBtn) saveBtn.textContent = "Step 3/3: Building Schedule...";
         const timetableToSave = appState.tempTimetable || [];
-        const syncResponse = await fetch(`${API_BASE_URL}/timetable/sync`, {
+        const syncResponse = await fetchWithTimeout(`${API_BASE_URL}/timetable/sync`, {
             method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                ...getAuthHeaders()
-            },
-            body: JSON.stringify({
-                timetable: timetableToSave
-            })
-        });
+            headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+            body: JSON.stringify({ timetable: timetableToSave })
+        }, 60000); // 60s — generating sessions for a full semester is the heaviest operation
         
         if (!syncResponse.ok) {
-            showToast("Partial Setup", "Semester saved but schedule sync failed. Check backend logs.", "warning");
-            if (saveBtn) {
-                saveBtn.disabled = false;
-                saveBtn.textContent = "Start Tracking";
-            }
+            showToast("Partial Setup", "Semester saved but schedule sync failed. You can re-sync from Settings.", "warning");
+            if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = originalBtnText; }
             return;
         }
         
@@ -4971,12 +4972,14 @@ async function saveOnboardingWizardData() {
         
         showToast("Setup Complete ✨", "Timetable & Calendar setup synced successfully!", "check_circle");
     } catch (err) {
-        if (saveBtn) {
-            saveBtn.disabled = false;
-            saveBtn.textContent = "Start Tracking";
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = originalBtnText; }
+        if (err.name === "AbortError") {
+            console.error("Setup timeout:", err);
+            showToast("Setup Timed Out", "The server took too long. Please try again — your semester was likely created. Check Settings.", "warning");
+        } else {
+            console.error("Setup error:", err);
+            showToast("Setup Error", "Failed to sync onboarding details. Please try again.", "error");
         }
-        console.error("Setup error:", err);
-        showToast("Setup Error", "Failed to sync onboarding details.", "error");
     }
 }
 

@@ -1553,11 +1553,9 @@ def _generate_sessions_for_active_semester(db: Session, user_id: int):
     day_entries = defaultdict(list)
     for entry in entries:
         day_entries[entry.day].append(entry)
-        
-    print(f"[DEBUG] day_entries keys: {list(day_entries.keys())}")
+
     curr = start_gen
     to_add = []
-    print(f"[DEBUG] _generate_sessions_for_active_semester: start={start_gen}, end={end_gen}, entries={len(entries)}")
     while curr <= end_gen:
         day_str = days_map[curr.weekday()]
         status = "holiday" if (curr in holiday_dates and curr not in working_saturdays) else "upcoming"
@@ -1565,9 +1563,6 @@ def _generate_sessions_for_active_semester(db: Session, user_id: int):
         if day_str == "Sun":
             curr += timedelta(days=1)
             continue
-            
-        if day_entries[day_str]:
-            print(f"[DEBUG] Found entries for day {day_str} on date {curr}: {len(day_entries[day_str])}")
             
         for entry in day_entries[day_str]:
             key = (curr, entry.start_time, entry.subject_id)
